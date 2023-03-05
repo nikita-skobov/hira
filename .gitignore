@@ -2,4 +2,7 @@
 /Cargo.lock
 deploy.yml
 deploy.sh
-out/
+examples/*/out
+examples/*/deploy.sh
+examples/*/deploy.yml
+examples/*/target/
