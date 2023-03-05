@@ -66,6 +66,8 @@ impl From<AttributeValue> for LambdaFunction {
 
 pub fn add_lambda_resource<S: AsRef<str>>(bucket_name: S, func_name: S, lambda_conf: LambdaFunction) {
     let func_name = func_name.as_ref();
+    // lambda resources can only be alphanumeric
+    let func_name_resource = func_name.replace("_", "");
     let bucket_name = bucket_name.as_ref();
     let memory = &lambda_conf.memory;
     let timeout = &lambda_conf.timeout;
@@ -85,7 +87,7 @@ pub fn add_lambda_resource<S: AsRef<str>>(bucket_name: S, func_name: S, lambda_c
     }
     unsafe {
         RESOURCES.push(format!("
-    Lambda{func_name}:
+    Lambda{func_name_resource}:
         Type: 'AWS::Lambda::Function'
         Properties:
             FunctionName: {func_name}
@@ -100,8 +102,8 @@ pub fn add_lambda_resource<S: AsRef<str>>(bucket_name: S, func_name: S, lambda_c
 {environment_variables}
             Architectures:
             - arm64
-            Role: !GetAtt LambdaExecutionRole{func_name}.Arn
-    LambdaExecutionRole{func_name}:
+            Role: !GetAtt LambdaExecutionRole{func_name_resource}.Arn
+    LambdaExecutionRole{func_name_resource}:
         Type: AWS::IAM::Role
         Properties:
             AssumeRolePolicyDocument:
