@@ -18,13 +18,15 @@ set_deploy_region!("us-east-1");
 set_stack_name!("hello-world-stack");
 
 #[create_lambda]
-fn hello_world(event: String) -> String {
-    format!("Your event was {event}")
+async fn hello_world(_event: String) -> String {
+    // this calls lambda:InvokeFunction on the 'apples' lambda!
+    let apples_str = apples(2).await;
+    format!("You have {apples_str}")
 }
 
 #[create_lambda]
-fn apples(event: String) -> String {
-    "apples".to_string()
+async fn apples(n: usize) -> String {
+    format!("{n} apples")
 }
 
 close!();
