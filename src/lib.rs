@@ -13,11 +13,8 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr = parse_attributes(attr);
     let lambda_conf: LambdaFunction = attr.into();
 
-    let mut bin_name = "".to_string();
+    let mut bin_name = unsafe {STACK_NAME.clone()};
     for (key, value) in env::vars() {
-        if key == "RUSTFLAGS" {
-            println!("RUSTFLAGS: {:?}", value);
-        }
         if key == "CARGO_BIN_NAME" {
             bin_name = value;
         }
@@ -52,18 +49,20 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
         #[cfg({func_name})]
         #[tokio::main]
         async fn main() -> Result<(), Error> {{
-            let func = service_fn(lambda_service_func);
+            let func = lambda_runtime::service_fn(lambda_service_func);
             lambda_runtime::run(func).await?;
             Ok(())
         }}
     ");
     let prototype_str = format!("
         #[cfg({func_name})]
-        async fn lambda_service_func(event: LambdaEvent<{use_type}>) -> {use_ret} {{ {use_body} }}"
+        async fn lambda_service_func(event: lambda_runtime::LambdaEvent<{use_type}>) -> {use_ret} {{ {use_body} }}"
     );
     let main_stream = TokenStream::from_str(&main_str).unwrap();
     let prototype_stream = TokenStream::from_str(&prototype_str).unwrap();
-    let mut out = func_def.build();
+    let dont_warn_stream = TokenStream::from_str("#[allow(dead_code)]").unwrap();
+    let mut out = dont_warn_stream;
+    out.extend(func_def.build());
     out.extend(prototype_stream);
     out.extend(main_stream);
 

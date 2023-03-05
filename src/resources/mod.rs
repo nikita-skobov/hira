@@ -19,11 +19,13 @@ pub fn add_build_cmd<S: AsRef<str>>(cmd: S) {
         BUILD_COMMANDS.push(cmd.as_ref().into());
     }
 }
+#[allow(dead_code)]
 pub fn add_package_cmd<S: AsRef<str>>(cmd: S) {
     unsafe {
         PACKAGE_COMMANDS.push(cmd.as_ref().into());
     }
 }
+#[allow(dead_code)]
 pub fn add_deploy_cmd<S: AsRef<str>>(cmd: S) {
     unsafe {
         DEPLOY_COMMANDS.push(cmd.as_ref().into());
