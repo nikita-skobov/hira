@@ -39,16 +39,16 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         // if it's empty, use the default Result<(), Error>
         if ret_type.is_empty() {
-            ("Result<(), Error>".into(), format!("Ok({func_name}(){use_async})"))
+            ("Result<(), lambda_runtime::Error>".into(), format!("Ok({func_name}(){use_async})"))
         } else {
-            (format!("Result<{}, Error>", ret_type), format!("let (x, _context) = event.into_parts(); Ok({func_name}(x){use_async})"))
+            (format!("Result<{}, lambda_runtime::Error>", ret_type), format!("let (x, _context) = event.into_parts(); Ok({func_name}(x){use_async})"))
         }
     };
 
     let main_str = format!("
         #[cfg({func_name})]
         #[tokio::main]
-        async fn main() -> Result<(), Error> {{
+        async fn main() -> Result<(), lambda_runtime::Error> {{
             let func = lambda_runtime::service_fn(lambda_service_func);
             lambda_runtime::run(func).await?;
             Ok(())
@@ -79,7 +79,6 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
     add_lambda_resource(build_bucket, &func_name, lambda_conf);
 
-    println!("{}", out.to_string());
     out
 }
 

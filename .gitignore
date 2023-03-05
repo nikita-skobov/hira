@@ -1,2 +1,5 @@
 /target
 /Cargo.lock
+deploy.yml
+deploy.sh
+out/
