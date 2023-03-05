@@ -1,5 +1,7 @@
 use super::*;
 
+pub static mut CREATED_LAMBDA: bool = false;
+
 pub struct LambdaFunction {
     pub memory: String,
     pub timeout: String,

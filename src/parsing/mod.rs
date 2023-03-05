@@ -310,6 +310,14 @@ impl FuncDef {
         }
         stream.to_string()
     }
+    pub fn change_func_name(&mut self, new_name: &str) {
+        if let proc_macro::TokenTree::Ident(id) = &self.fn_name {
+            let span = id.span();
+            self.fn_name = TokenTree::Ident(Ident::new(new_name, span));
+        } else {
+            panic!("Expected fn_name to be an ident. instead found {:?}", self.fn_name);
+        }
+    }
     pub fn get_func_name(&self) -> String {
         if let proc_macro::TokenTree::Ident(id) = &self.fn_name {
             return id.to_string();

@@ -13,6 +13,14 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr = parse_attributes(attr);
     let lambda_conf: LambdaFunction = attr.into();
 
+    let mut should_output_client = false;
+    unsafe {
+        if !CREATED_LAMBDA {
+            CREATED_LAMBDA = true;
+            should_output_client = true;
+        }
+    }
+
     let mut bin_name = unsafe {STACK_NAME.clone()};
     for (key, value) in env::vars() {
         if key == "CARGO_BIN_NAME" {
@@ -26,6 +34,9 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
     // println!("ITEM: {:#?}", item);
     let mut func_def = parse_func_def(item, false);
     func_def.assert_num_params(1);
+    if func_def.fn_async_ident.is_none() {
+        panic!("Lambda functions must be async");
+    }
     let ret_type = func_def.get_return_type();
     let func_name = func_def.get_func_name();
     let use_async = if func_def.fn_async_ident.is_some() {
@@ -33,17 +44,73 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         ""
     };
+    let renamed_func = format!("actual_{func_name}");
+    func_def.change_func_name(&renamed_func);
     let (_, use_type) = func_def.get_nth_param(0);
     let (use_ret, use_body) = if ret_type.starts_with("Result") {
-        (ret_type, format!("let (x, _context) = event.into_parts(); {func_name}(x){use_async}"))
+        (ret_type.clone(), format!("let (x, _context) = event.into_parts(); {renamed_func}(x){use_async}"))
     } else {
         // if it's empty, use the default Result<(), Error>
         if ret_type.is_empty() {
-            ("Result<(), lambda_runtime::Error>".into(), format!("Ok({func_name}(){use_async})"))
+            ("Result<(), lambda_runtime::Error>".into(), format!("Ok({renamed_func}(){use_async})"))
         } else {
-            (format!("Result<{}, lambda_runtime::Error>", ret_type), format!("let (x, _context) = event.into_parts(); Ok({func_name}(x){use_async})"))
+            (format!("Result<{}, lambda_runtime::Error>", ret_type.clone()), format!("let (x, _context) = event.into_parts(); Ok({renamed_func}(x){use_async})"))
         }
     };
+
+    let region = unsafe {&DEPLOY_REGION};
+    let client_func_str = &format!("
+        // TODO: save the client somehow. dont re-create for each request...
+        pub async fn make_lambda_client() -> aws_sdk_lambda::Client {{
+            let region_provider = aws_config::meta::region::RegionProviderChain::default_provider().or_else({region});
+            let sdk_config = aws_config::from_env().region(region_provider).load().await;
+            aws_sdk_lambda::Client::new(&sdk_config)
+        }}
+    ");
+
+    let invoke_safe_str = format!("
+        async fn {func_name}_safe(n: {use_type}) -> Result<{ret_type}, lambda_runtime::Error> {{
+            let payload = match serde_json::to_string(&n) {{
+                Ok(p) => p,
+                Err(e) => return Err(e.into()),
+            }};
+            let c = make_lambda_client().await;
+            let res = c.invoke().function_name(\"{func_name}\")
+                .payload(aws_sdk_lambda::types::Blob::new(payload))
+                .send().await;
+            match res {{
+                Ok(out) => {{
+                    if let Some(payload) = out.payload() {{
+                        let payload = payload.as_ref();
+                        match serde_json::from_slice::<{ret_type}>(&payload) {{
+                            Ok(s) => Ok(s),
+                            Err(e) => {{
+                                Err(lambda_runtime::Error::from(e))
+                            }}
+                        }}
+                    }} else {{
+                        Err(lambda_runtime::Error::from(\"Empty response from lambda\"))
+                    }}
+                }}
+                Err(err) => {{
+                    Err(err.into())
+                }}
+            }}
+        }}
+    ");
+    let invoke_str = format!("
+        async fn {func_name}(n: {use_type}) -> {ret_type} {{
+            match {func_name}_safe(n).await {{
+                Ok(r) => r,
+                Err(e) => {{
+                    println!(\"Failed to invoke {func_name}: {{:?}}\", e);
+                    // purposefully hide errors from being returned from lambda.
+                    // the real errors can be found in cloudwatch.
+                    panic!(\"internal error\");
+                }}
+            }}
+        }}
+    ");
 
     let main_str = format!("
         #[cfg({func_name})]
@@ -58,13 +125,21 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
         #[cfg({func_name})]
         async fn lambda_service_func(event: lambda_runtime::LambdaEvent<{use_type}>) -> {use_ret} {{ {use_body} }}"
     );
+    let client_func_stream = TokenStream::from_str(&client_func_str).unwrap();
     let main_stream = TokenStream::from_str(&main_str).unwrap();
+    let invoke_safe_stream = TokenStream::from_str(&invoke_safe_str).unwrap();
+    let invoke_stream = TokenStream::from_str(&invoke_str).unwrap();
     let prototype_stream = TokenStream::from_str(&prototype_str).unwrap();
     let dont_warn_stream = TokenStream::from_str("#[allow(dead_code)]").unwrap();
     let mut out = dont_warn_stream;
     out.extend(func_def.build());
     out.extend(prototype_stream);
     out.extend(main_stream);
+    if should_output_client {
+        out.extend(client_func_stream);
+    }
+    out.extend(invoke_safe_stream);
+    out.extend(invoke_stream);
 
     // TODO: allow user to set target to x86 optionally
     let target = "aarch64-unknown-linux-musl";
@@ -78,7 +153,6 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
         panic!("No build bucket found. Must provide a bucket name via set_build_bucket!();");
     }
     add_lambda_resource(build_bucket, &func_name, lambda_conf);
-
     out
 }
 

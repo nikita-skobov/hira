@@ -13,7 +13,6 @@ pub static mut PACKAGE_COMMANDS: Vec<String> = vec![];
 pub static mut DEPLOY_COMMANDS: Vec<String> = vec![];
 pub static mut RESOURCES: Vec<String> = vec![];
 
-
 pub fn add_build_cmd<S: AsRef<str>>(cmd: S) {
     unsafe {
         BUILD_COMMANDS.push(cmd.as_ref().into());
