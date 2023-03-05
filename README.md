@@ -8,7 +8,7 @@ Homoiconic Rust Aws
 
 ## What is Hira?
 
-Hira is a set of rust procedural macros that can manipulate rust code at compile time to create deployment infrastructure. A single rust binary project can be used to create an entire AWS application. This can be best explained via an example. Consider the following code:
+Hira is a set of rust procedural macros that can manipulate rust code at compile time to create deployment infrastructure for AWS. A single rust binary project can be used to create an entire AWS application. This can be best explained via an example. Consider the following code:
 
 ```rs
 use hira::{close, create_lambda, set_build_bucket, set_deploy_region, set_stack_name};
