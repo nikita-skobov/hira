@@ -35,7 +35,7 @@ When you run `cargo build` this creates 2 artifacts in your current directory:
 - deploy.sh
 - deploy.yml
 
-The yaml file is a cloudformation template which defines your resources, in this case a hello_world lambda function. The deploy script will build all of your lambda functions individually, package them for lambda, and then deploy the cloudformation template.
+The yaml file is a cloudformation template which defines your resources, in this case two lambda functions: `hello_world` and `apples`. The deploy script will build all of your lambda functions individually, package them for lambda, and then deploy the cloudformation template.
 
 ## How to use?
 
