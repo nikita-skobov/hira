@@ -4,7 +4,9 @@ set_build_bucket!("put-the-name-of-your-s3-bucket-here");
 set_deploy_region!("us-east-1");
 set_stack_name!("hello-world-stack4");
 
-#[create_lambda]
+#[create_lambda({
+    policy_statements: [{"action": "lambda:InvokeFunction", "resource": "arn:aws:lambda:*:*:function:apples"}],
+})]
 async fn hello_world(_event: String) -> String {
     // this invokes the 'apples' lambda function
     let apples_str = apples(2).await;
