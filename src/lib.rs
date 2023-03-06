@@ -21,9 +21,9 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
 
-    let mut bin_name = unsafe {STACK_NAME.clone()};
+    let mut bin_name = "".to_string();
     for (key, value) in env::vars() {
-        if key == "CARGO_BIN_NAME" {
+        if key == "CARGO_BIN_NAME" || key == "CARGO_CRATE_NAME" {
             bin_name = value;
         }
     }
