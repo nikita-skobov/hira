@@ -27,6 +27,14 @@ impl AttributeValue {
             }
         }
     }
+    pub fn assert_list(self, key: &str) -> Vec<AttributeValue> {
+        match self {
+            AttributeValue::List(l) => l,
+            _ => {
+                panic!("Expected list type at {}. Instead found {:?}", key, self);
+            }
+        }
+    }
 }
 
 pub fn get_attribute_value(token: TokenTree) -> AttributeValue {

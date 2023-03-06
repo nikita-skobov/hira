@@ -2,12 +2,50 @@ use super::*;
 
 pub static mut CREATED_LAMBDA: bool = false;
 
+#[derive(Debug)]
+pub struct PolicyStatement {
+    pub effect: String,
+    pub action: String,
+    pub resource: String,
+}
+impl PolicyStatement {
+    pub fn from_attribute_map(mut map: HashMap<String, AttributeValue>) -> Self {
+        let effect = match map.remove("effect") {
+            Some(e) => {
+                e.assert_str("effect")
+            }
+            None => {
+                // if no 'effect' key is provided, assume user meant allow.
+                // only Denys should be explicit.
+                "Allow".to_string()
+            }
+        };
+        if effect != "Deny"  && effect != "Allow" {
+            panic!("policy statement effect must be Allow or Deny");
+        }
+        let action = match map.remove("action") {
+            Some(e) => {
+                e.assert_str("action")
+            }
+            None => panic!("policy statement must include 'action'")
+        };
+        let resource = match map.remove("resource") {
+            Some(e) => {
+                e.assert_str("resource")
+            }
+            None => panic!("policy statement must include 'resource'")
+        };
+        PolicyStatement { effect, action, resource }
+    }
+}
+
 pub struct LambdaFunction {
     pub memory: String,
     pub timeout: String,
     pub environment_variables: HashMap<String, String>,
     pub tags: HashMap<String, String>,
     pub description: String,
+    pub policy_statements: Vec<PolicyStatement>,
 }
 
 impl Default for LambdaFunction {
@@ -17,7 +55,8 @@ impl Default for LambdaFunction {
             timeout: "30".into(),
             environment_variables: Default::default(),
             tags: Default::default(),
-            description: Default::default()
+            description: Default::default(),
+            policy_statements: Default::default(),
         }
     }
 }
@@ -40,6 +79,13 @@ impl From<AttributeValue> for LambdaFunction {
                 "timeout" => {
                     out.timeout = value.assert_str("timeout");
                 },
+                "policy_statements" => {
+                    let vars = value.assert_list("policy_statements");
+                    for v in vars {
+                        let statement = v.assert_map("policy_statements");
+                        out.policy_statements.push(PolicyStatement::from_attribute_map(statement));
+                    }
+                }
                 "environment_variables" => {
                     let vars = value.assert_map("environment_variables");
                     for (name, map_value) in vars {
@@ -87,6 +133,15 @@ pub fn add_lambda_resource<S: AsRef<str>>(bucket_name: S, func_name: S, lambda_c
             tags.push_str(&format!("            - Key: {}\n              Value: {}\n", key, val));
         }
     }
+    let mut policy_str = "".to_string();
+    if !lambda_conf.policy_statements.is_empty() {
+        policy_str.push_str("            Policies:\n            - PolicyName: lambda_generated_policy\n              PolicyDocument:\n                  Version: '2012-10-17'\n                  Statement:\n");
+        for statement in lambda_conf.policy_statements {
+            policy_str.push_str(&format!("                    - Effect: {}\n", statement.effect));
+            policy_str.push_str(&format!("                      Action: '{}'\n", statement.action));
+            policy_str.push_str(&format!("                      Resource: '{}'\n", statement.resource));
+        }
+    }
     unsafe {
         RESOURCES.push(format!("
     Lambda{func_name_resource}:
@@ -118,6 +173,7 @@ pub fn add_lambda_resource<S: AsRef<str>>(bucket_name: S, func_name: S, lambda_c
                           - sts:AssumeRole
             ManagedPolicyArns:
             - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+{policy_str}
 "
         ));
     }
