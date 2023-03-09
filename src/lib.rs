@@ -145,14 +145,18 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
     let target = "aarch64-unknown-linux-musl";
     add_build_cmd(format!("RUSTFLAGS=\"--cfg {func_name}\" cross build --release --target {target}"));
     add_build_cmd(format!("cp target/{target}/release/{bin_name} ./bootstrap"));
-    add_build_cmd(format!("zip -r {func_name}.zip bootstrap"));
-    add_build_cmd(format!("mkdir -p ./out && mv {func_name}.zip ./out/"));
+    add_build_cmd(format!("md5{func_name}=($(md5sum ./bootstrap))"));
+    add_build_cmd(format!("zip -r {func_name}_$md5{func_name}.zip bootstrap"));
+    let mut param_name = format!("Param{func_name}Hash");
+    param_name = param_name.replace("_", "");
+    add_param_value((&param_name, format!("{func_name}_$md5{func_name}.zip")));
+    add_build_cmd(format!("mkdir -p ./out && mv {func_name}_$md5{func_name}.zip ./out/"));
     add_build_cmd(format!("rm bootstrap"));
     let build_bucket = unsafe {&BUILD_BUCKET};
     if build_bucket.is_empty() {
         panic!("No build bucket found. Must provide a bucket name via set_build_bucket!();");
     }
-    add_lambda_resource(build_bucket, &func_name, lambda_conf);
+    add_lambda_resource(build_bucket, &func_name, lambda_conf, param_name);
     out
 }
 
@@ -231,7 +235,14 @@ unsafe fn output_deployment_file() {
     if stack_name.is_empty() {
         stack_name = env::var("CARGO_BIN_NAME").expect("No stack name provided, and failed to use cargo bin name as stack name");
     }
-    file.write_all(format!("AWS_REGION={region} aws --region {region} cloudformation deploy --stack-name {stack_name} --template-file ./deploy.yml --capabilities CAPABILITY_NAMED_IAM").as_bytes()).expect("Failed to write");
+    let mut cmd = format!("AWS_REGION={region} aws --region {region} cloudformation deploy --stack-name {stack_name} --template-file ./deploy.yml --capabilities CAPABILITY_NAMED_IAM");
+    if !PARAMETER_VALUES.is_empty() {
+        cmd.push_str(" --parameter-overrides ");
+        for (key, value) in &PARAMETER_VALUES {
+            cmd.push_str(&format!("{key}={value} "));
+        }
+    }
+    file.write_all(cmd.as_bytes()).expect("Failed to write");
     for step in DEPLOY_COMMANDS.iter() {
         file.write_all(step.as_bytes()).expect("failed to write");
         file.write_all("\n".as_bytes()).expect("failed to write");
@@ -249,6 +260,13 @@ unsafe fn output_deployment_file() {
 unsafe fn output_cloudformation_yml() {
     let mut file = std::fs::File::create("./deploy.yml").expect("Failed to create deploy.yml file");
     file.write_all("AWSTemplateFormatVersion: '2010-09-09'\n".as_bytes()).expect("failed to write");
+    if !PARAMETER_VALUES.is_empty() {
+        file.write_all("Parameters:\n".as_bytes()).expect("failed to write");
+        for p in &PARAMETER_VALUES {
+            let key = &p.0;
+            file.write_all(format!("    {key}:\n        Type: String\n").as_bytes()).expect("failed to write");
+        }
+    }
     file.write_all("Resources:\n".as_bytes()).expect("Failed to write");
     for resource in RESOURCES.iter() {
         file.write_all(resource.as_bytes()).expect("failed to write");

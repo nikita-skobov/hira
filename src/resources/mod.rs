@@ -12,6 +12,7 @@ pub static mut BUILD_COMMANDS: Vec<String> = vec![];
 pub static mut PACKAGE_COMMANDS: Vec<String> = vec![];
 pub static mut DEPLOY_COMMANDS: Vec<String> = vec![];
 pub static mut RESOURCES: Vec<String> = vec![];
+pub static mut PARAMETER_VALUES: Vec<(String, String)> = vec![];
 
 pub fn add_build_cmd<S: AsRef<str>>(cmd: S) {
     unsafe {
@@ -28,5 +29,10 @@ pub fn add_package_cmd<S: AsRef<str>>(cmd: S) {
 pub fn add_deploy_cmd<S: AsRef<str>>(cmd: S) {
     unsafe {
         DEPLOY_COMMANDS.push(cmd.as_ref().into());
+    }
+}
+pub fn add_param_value<S: AsRef<str>, S1: AsRef<str>>(p: (S, S1)) {
+    unsafe {
+        PARAMETER_VALUES.push((p.0.as_ref().into(), p.1.as_ref().into()));
     }
 }

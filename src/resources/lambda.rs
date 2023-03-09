@@ -201,7 +201,7 @@ impl From<AttributeValue> for LambdaFunction {
     }
 }
 
-pub fn add_lambda_resource<S: AsRef<str>>(bucket_name: S, func_name: S, lambda_conf: LambdaFunction) {
+pub fn add_lambda_resource<S: AsRef<str>, S1: AsRef<str>>(bucket_name: S, func_name: S, lambda_conf: LambdaFunction, param_name: S1) {
     let func_name = func_name.as_ref();
     // lambda resources can only be alphanumeric
     let func_name_resource = func_name.replace("_", "");
@@ -259,6 +259,7 @@ pub fn add_lambda_resource<S: AsRef<str>>(bucket_name: S, func_name: S, lambda_c
             }
         }
     }
+    let param_name = param_name.as_ref();
     unsafe {
         RESOURCES.push(format!("
     Lambda{func_name_resource}:
@@ -268,7 +269,7 @@ pub fn add_lambda_resource<S: AsRef<str>>(bucket_name: S, func_name: S, lambda_c
             Runtime: provided.al2
             Code:
                 S3Bucket: {bucket_name}
-                S3Key: {func_name}.zip
+                S3Key: !Sub '${{{param_name}}}'
             Handler: index.handler
 {tags}
             MemorySize: {memory}
