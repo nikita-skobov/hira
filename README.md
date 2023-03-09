@@ -12,6 +12,7 @@ Hira is a set of rust procedural macros that can manipulate rust code at compile
 
 ```rs
 use hira::{close, create_lambda, set_build_bucket, set_deploy_region, set_stack_name};
+use serde_json::Value;
 
 set_build_bucket!("put-the-name-of-your-s3-bucket-here");
 set_deploy_region!("us-east-1");
