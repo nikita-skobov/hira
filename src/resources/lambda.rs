@@ -255,6 +255,7 @@ pub fn add_lambda_resource<S: AsRef<str>>(bucket_name: S, func_name: S, lambda_c
                 if !cors_expose_headers.is_empty() {
                     trigger_section.push_str(&format!("                ExposeHeaders: {:?}\n", cors_expose_headers));
                 }
+                trigger_section.push_str(&format!("    LambdaPermission{func_name_resource}{i}:\n        Type: AWS::Lambda::Permission\n        Properties:\n            Action: 'lambda:InvokeFunctionUrl'\n            FunctionName: !GetAtt Lambda{func_name_resource}.Arn\n            FunctionUrlAuthType: NONE\n            Principal: '*'\n"));
             }
         }
     }
