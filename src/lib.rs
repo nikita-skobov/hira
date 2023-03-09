@@ -143,14 +143,14 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // TODO: allow user to set target to x86 optionally
     let target = "aarch64-unknown-linux-musl";
-    add_build_cmd(format!("RUSTFLAGS=\"--cfg {func_name}\" cross build --release --target {target} --target-dir cross-target"));
-    add_build_cmd(format!("cp target/{target}/release/{bin_name} ./bootstrap"));
+    add_build_cmd(format!("RUSTFLAGS=\"--cfg {func_name}\" cross build --release --target {target} --target-dir hira/cross-target-{func_name}"));
+    add_build_cmd(format!("cp hira/cross-target-{func_name}/{target}/release/{bin_name} ./bootstrap"));
     add_build_cmd(format!("md5{func_name}=($(md5sum ./bootstrap))"));
     add_build_cmd(format!("zip -r {func_name}_$md5{func_name}.zip bootstrap"));
     let mut param_name = format!("Param{func_name}Hash");
     param_name = param_name.replace("_", "");
     add_param_value((&param_name, format!("{func_name}_$md5{func_name}.zip")));
-    add_build_cmd(format!("mkdir -p ./out && mv {func_name}_$md5{func_name}.zip ./out/"));
+    add_build_cmd(format!("mkdir -p ./hira/out && mv {func_name}_$md5{func_name}.zip ./hira/out/"));
     add_build_cmd(format!("rm bootstrap"));
     let build_bucket = unsafe {&BUILD_BUCKET};
     if build_bucket.is_empty() {
@@ -217,14 +217,14 @@ unsafe fn output_deployment_file() {
     let mut file = std::fs::File::create("./deploy.sh").expect("Failed to create deploy.sh file");
     file.write_all("#!/usr/bin/env bash\n\n".as_bytes()).expect("failed to write");
     file.write_all("# build:\n".as_bytes()).expect("failed to write");
-    file.write_all("rm -rf ./out/\n".as_bytes()).expect("failed to write");
+    file.write_all("rm -rf ./hira/out/\n".as_bytes()).expect("failed to write");
     for step in BUILD_COMMANDS.iter() {
         file.write_all(step.as_bytes()).expect("failed to write");
         file.write_all("\n".as_bytes()).expect("failed to write");
     }
     file.write_all("\n# package:\n".as_bytes()).expect("failed to write");
     let bucket = unsafe {&BUILD_BUCKET};
-    file.write_all(format!("aws s3 cp --recursive ./out/ s3://{bucket}").as_bytes()).expect("failed to write");
+    file.write_all(format!("aws s3 sync --size-only ./hira/out/ s3://{bucket}").as_bytes()).expect("failed to write");
     for step in PACKAGE_COMMANDS.iter() {
         file.write_all(step.as_bytes()).expect("failed to write");
         file.write_all("\n".as_bytes()).expect("failed to write");

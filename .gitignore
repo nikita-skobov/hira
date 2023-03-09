@@ -1,6 +1,7 @@
 /target
 /cross-target
 /Cargo.lock
+/hira
 deploy.yml
 deploy.sh
 examples/*/out
@@ -8,3 +9,4 @@ examples/*/deploy.sh
 examples/*/deploy.yml
 examples/*/target/
 examples/*/cross-target/
+examples/*/hira/
