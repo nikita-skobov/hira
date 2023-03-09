@@ -15,11 +15,18 @@ use hira::{close, create_lambda, set_build_bucket, set_deploy_region, set_stack_
 
 set_build_bucket!("put-the-name-of-your-s3-bucket-here");
 set_deploy_region!("us-east-1");
-set_stack_name!("hello-world-stack");
+set_stack_name!("hello-world-stack4");
 
-#[create_lambda]
-async fn hello_world(_event: String) -> String {
-    // this calls lambda:InvokeFunction on the 'apples' lambda!
+#[create_lambda({
+    triggers: [{ "type": function_url }],
+    policy_statements: [{
+        "action": "lambda:InvokeFunction",
+        "resource": "arn:aws:lambda:*:*:function:apples"
+    }],
+})]
+async fn hello_world(event: Value) -> String {
+    println!("{:#?}", event);
+    // this invokes the 'apples' lambda function
     let apples_str = apples(2).await;
     format!("You have {apples_str}")
 }
@@ -31,6 +38,7 @@ async fn apples(n: usize) -> String {
 
 close!();
 
+
 ```
 
 When you run `cargo build` this creates 2 artifacts in your current directory:
@@ -38,6 +46,8 @@ When you run `cargo build` this creates 2 artifacts in your current directory:
 - deploy.yml
 
 The yaml file is a cloudformation template which defines your resources, in this case two lambda functions: `hello_world` and `apples`. The deploy script will build all of your lambda functions individually, package them for lambda, and then deploy the cloudformation template.
+
+When you deploy this cloudformation template, it will create 2 lambda functions. The `hello_world` function gets a FunctionUrl, and when you make an HTTP request to it, it will invoke the `apples` lambda function.
 
 ## How to use?
 

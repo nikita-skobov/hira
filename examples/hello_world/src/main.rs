@@ -5,9 +5,14 @@ set_deploy_region!("us-east-1");
 set_stack_name!("hello-world-stack4");
 
 #[create_lambda({
-    policy_statements: [{"action": "lambda:InvokeFunction", "resource": "arn:aws:lambda:*:*:function:apples"}],
+    triggers: [{ "type": function_url }],
+    policy_statements: [{
+        "action": "lambda:InvokeFunction",
+        "resource": "arn:aws:lambda:*:*:function:apples"
+    }],
 })]
-async fn hello_world(_event: String) -> String {
+async fn hello_world(event: Value) -> String {
+    println!("{:#?}", event);
     // this invokes the 'apples' lambda function
     let apples_str = apples(2).await;
     format!("You have {apples_str}")
