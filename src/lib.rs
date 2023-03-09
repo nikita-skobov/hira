@@ -143,7 +143,7 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // TODO: allow user to set target to x86 optionally
     let target = "aarch64-unknown-linux-musl";
-    add_build_cmd(format!("RUSTFLAGS=\"--cfg {func_name}\" cross build --release --target {target}"));
+    add_build_cmd(format!("RUSTFLAGS=\"--cfg {func_name}\" cross build --release --target {target} --target-dir cross-target"));
     add_build_cmd(format!("cp target/{target}/release/{bin_name} ./bootstrap"));
     add_build_cmd(format!("md5{func_name}=($(md5sum ./bootstrap))"));
     add_build_cmd(format!("zip -r {func_name}_$md5{func_name}.zip bootstrap"));
