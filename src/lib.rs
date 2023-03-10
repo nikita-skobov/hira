@@ -40,6 +40,53 @@ pub fn create_route53_record(attr: TokenStream, item: TokenStream) -> TokenStrea
 }
 
 #[proc_macro_attribute]
+pub fn create_static_website(attr: TokenStream, _item: TokenStream) -> TokenStream {
+    let attr = parse_attributes(attr);
+    let conf: StaticWebsite = attr.into();
+
+    let mut bucket_name = format!("hiragen{}", conf.url);
+    bucket_name = bucket_name.replace(".", "").replace("-", "").replace("_", "");
+
+    let mut region = unsafe { DEPLOY_REGION.clone() };
+    let url = &conf.url;
+    let arn = &conf.acm_arn;
+    let cdn_resource_name = format!("CDN{bucket_name}");
+    if region.starts_with('"') && region.ends_with('"') {
+        region.remove(0);
+        region.pop();
+    }
+    let bucket_domain = format!("{bucket_name}.s3-website-{region}.amazonaws.com");
+
+    let out_stream: TokenStream = format!("
+#[create_s3({{
+    name: \"{bucket_name}\",
+    public_website: {{}},
+}})]
+pub mod my_website_bucket {{}}
+
+#[create_cloudfront_distribution({{
+    origins_and_behaviors: [{{
+        domain_name: \"{bucket_domain}\",
+    }}],
+    name: \"{bucket_name}\",
+    aliases: [\"{url}\"],
+    acm_certificate_arn: \"{arn}\",
+}})]
+pub mod my_cdn {{}}
+
+
+#[create_route53_record({{
+    record_type: \"A\",
+    name: \"{url}\",
+    alias_target_dns_name: \"!GetAtt {cdn_resource_name}.DomainName\",
+    alias_target_hosted_zone_id: \"Z2FDTNDATAQYW2\",
+}})]
+pub mod my_record {{}}")
+    .parse().unwrap();
+    out_stream
+}
+
+#[proc_macro_attribute]
 pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr = parse_attributes(attr);
     let lambda_conf: LambdaFunction = attr.into();

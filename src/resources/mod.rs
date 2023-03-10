@@ -11,6 +11,10 @@ pub use cloudfront::*;
 mod route53;
 pub use route53::*;
 
+// higher level resources:
+mod static_website;
+pub use static_website::*;
+
 pub static mut BUILD_BUCKET: String = String::new();
 pub static mut DEPLOY_REGION: String = String::new();
 pub static mut STACK_NAME: String = String::new();
