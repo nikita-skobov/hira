@@ -7,6 +7,16 @@ use parsing::*;
 mod resources;
 use resources::*;
 
+#[proc_macro_attribute]
+pub fn create_s3(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // TODO: handle parsing the module under the item, and add convenience functions
+    // to the module
+    let attr = parse_attributes(attr);
+    let s3_conf: S3Bucket = attr.into();
+    add_s3_bucket_resource(s3_conf);
+    item
+}
+
 
 #[proc_macro_attribute]
 pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
