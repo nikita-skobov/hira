@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 pub use proc_macro::{TokenTree, TokenStream, Ident, Span, Punct, Delimiter, Group};
 
+use crate::variables::get_const;
+
 
 #[derive(Debug)]
 pub enum AttributeValue {
@@ -139,9 +141,15 @@ pub fn get_attribute_value(token: TokenTree) -> AttributeValue {
                 }
             }
         }
-        // id's are single values that we will treat as strings
+        // this is a reference to a const variable that was previously loaded.
+        // if it wasnt found, error.
         TokenTree::Ident(id) => {
-            return AttributeValue::Str(id.to_string());
+            let id_key = id.to_string();
+            if let Some(val) = get_const(&id_key) {
+                return AttributeValue::Str(val);
+            } else {
+                panic!("Failed to find value for '{id_key}'. Make sure you load it as a proper const using const_from_dot_env!(). Or if this value is meant to be used as is, surround it in double quotes like as \"{id_key}\"");
+            }
         }
         // also single values that we will treat as strings
         TokenTree::Literal(l) => {

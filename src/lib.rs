@@ -7,6 +7,9 @@ use parsing::*;
 mod resources;
 use resources::*;
 
+mod variables;
+use variables::*;
+
 #[proc_macro_attribute]
 pub fn create_s3(attr: TokenStream, item: TokenStream) -> TokenStream {
     // TODO: handle parsing the module under the item, and add convenience functions
@@ -238,6 +241,50 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
     out
 }
 
+/// load a .env file from a specific path
+#[proc_macro]
+pub fn load_dot_env(item: TokenStream) -> TokenStream {
+    let mut iter = item.into_iter();
+    let path = if let proc_macro::TokenTree::Literal(s) = iter.next().expect("must provide a string literal path to a .env file") {
+        s.to_string()
+    } else {
+        panic!("load_dot_env only accepts a string literal");
+    };
+    load_dot_env_inner(path);
+    "".parse().unwrap()
+}
+
+/// load a constant from a .env file in your current directory.
+/// if you wish to use a different path to your .env file, make sure to first
+/// call `load_dot_env!("../other/path/.env");`
+#[proc_macro]
+pub fn const_from_dot_env(item: TokenStream) -> TokenStream {
+    let mut iter = item.into_iter();
+    let id = if let proc_macro::TokenTree::Ident(id) = iter.next().expect("must provide an identifier") {
+        id
+    } else {
+        panic!("const_from_dot_env only accepts an identifier");
+    };
+    let mut value = "".into();
+    let key = id.to_string();
+    unsafe {
+        if DOT_ENV.is_none() {
+            load_dot_env_inner(".env".into());
+        }
+        if let Some(map) = &DOT_ENV {
+            if let Some(var) = map.get(&key) {
+                value = var.clone();
+            } else {
+                panic!("Failed to find {key} in loaded .env file");
+            }
+        } else {
+            panic!("Unexpected failure to read .env file");
+        }
+    }
+
+    set_const(&key, &value);
+    format!("pub const {key}: &'static str = \"{value}\";").parse().unwrap()
+}
 
 #[proc_macro]
 pub fn close(_item: TokenStream) -> TokenStream {
