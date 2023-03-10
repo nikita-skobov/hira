@@ -6,7 +6,7 @@ set_deploy_region!("us-east-1");
 set_stack_name!("hello-world-stack4");
 
 #[create_lambda({
-    triggers: [{ "type": function_url }],
+    triggers: [{ "type": "function_url" }],
     policy_statements: [{
         "action": "lambda:InvokeFunction",
         "resource": "arn:aws:lambda:*:*:function:apples"
