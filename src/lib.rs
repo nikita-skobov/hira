@@ -265,7 +265,7 @@ pub fn const_from_dot_env(item: TokenStream) -> TokenStream {
     } else {
         panic!("const_from_dot_env only accepts an identifier");
     };
-    let mut value = "".into();
+    let value: String;
     let key = id.to_string();
     unsafe {
         if DOT_ENV.is_none() {
@@ -313,7 +313,7 @@ pub fn const_from_dot_env_or_default(item: TokenStream) -> TokenStream {
         panic!("Expected string literal. Instead found {:?}", val);
     };
 
-    let mut value = "".into();
+    let value: String;
     let key = id.to_string();
     unsafe {
         if DOT_ENV.is_none() {
@@ -381,7 +381,7 @@ pub fn secret_from_dot_env(item: TokenStream) -> TokenStream {
     } else {
         panic!("secret_from_dot_env only accepts an identifier");
     };
-    let mut value = "".into();
+    let value: String;
     let key = id.to_string();
     unsafe {
         if DOT_ENV.is_none() {
