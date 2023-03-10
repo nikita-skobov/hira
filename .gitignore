@@ -10,3 +10,4 @@ examples/*/deploy.yml
 examples/*/target/
 examples/*/cross-target/
 examples/*/hira/
+.env
