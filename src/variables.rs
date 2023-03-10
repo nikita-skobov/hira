@@ -3,7 +3,11 @@ use std::collections::HashMap;
 pub static mut DOT_ENV: Option<HashMap<String, String>> = None;
 pub static mut LOADED_CONSTS: Option<HashMap<String, String>> = None;
 
-pub fn load_dot_env_inner(path: String) {
+pub fn load_dot_env_inner(mut path: String) {
+    if path.starts_with('"') && path.ends_with('"') {
+        path.remove(0);
+        path.pop();
+    }
     let contents = match std::fs::read_to_string(&path) {
         Ok(contents) => contents,
         Err(e) => panic!("Failed to load .env file {}: {}", path, e),
