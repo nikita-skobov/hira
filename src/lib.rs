@@ -17,6 +17,18 @@ pub fn create_s3(attr: TokenStream, item: TokenStream) -> TokenStream {
     item
 }
 
+#[proc_macro_attribute]
+pub fn create_cloudfront_distribution(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // TODO: handle parsing the module under the item, and add convenience functions
+    // to the module
+    let attr = parse_attributes(attr);
+    let conf: CloudfrontDistribution = attr.into();
+    // TODO: if the conf doesnt have a name/description, set it
+    // via the mod name item
+    add_cloudfront_resource(conf);
+    item
+}
+
 
 #[proc_macro_attribute]
 pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {

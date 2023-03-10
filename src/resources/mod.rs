@@ -6,6 +6,8 @@ mod lambda;
 pub use lambda::*;
 mod s3_bucket;
 pub use s3_bucket::*;
+mod cloudfront;
+pub use cloudfront::*;
 
 pub static mut BUILD_BUCKET: String = String::new();
 pub static mut DEPLOY_REGION: String = String::new();
