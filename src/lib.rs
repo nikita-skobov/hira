@@ -286,6 +286,122 @@ pub fn const_from_dot_env(item: TokenStream) -> TokenStream {
     format!("pub const {key}: &'static str = \"{value}\";").parse().unwrap()
 }
 
+/// load a constant from a .env file in your current directory, or use a default
+/// string literal if not found in the .env.
+#[proc_macro]
+pub fn const_from_dot_env_or_default(item: TokenStream) -> TokenStream {
+    let mut iter = item.into_iter();
+    let id = if let proc_macro::TokenTree::Ident(id) = iter.next().expect("must provide an identifier") {
+        id
+    } else {
+        panic!("const_from_dot_env_or_default only accepts an identifier");
+    };
+    let punct = iter.next().expect("Unexpected end of parameters. Must provide 2 parameters to const_from_dot_env_or_default!(). For example `const_from_dot_env_or_default!(MY_VAR, \"my-default-value\")`");
+    if let proc_macro::TokenTree::Punct(_) = punct {
+    } else {
+        panic!("Expected punctuation ',', instead found {:?} token", punct);
+    }
+    let val = iter.next().expect("Unexpected end of parameters. Must provide 2 parameters to const_from_dot_env_or_default!(). For example `const_from_dot_env_or_default!(MY_VAR, \"my-default-value\")`");
+    let default_value = if let proc_macro::TokenTree::Literal(s) = val {
+        let mut s = s.to_string();
+        if s.starts_with('"') && s.ends_with('"') {
+            s.remove(0);
+            s.pop();
+        }
+        s
+    } else {
+        panic!("Expected string literal. Instead found {:?}", val);
+    };
+
+    let mut value = "".into();
+    let key = id.to_string();
+    unsafe {
+        if DOT_ENV.is_none() {
+            load_dot_env_inner(".env".into());
+        }
+        if let Some(map) = &DOT_ENV {
+            if let Some(var) = map.get(&key) {
+                value = var.clone();
+            } else {
+                value = default_value;
+            }
+        } else {
+            value = default_value;
+        }
+    }
+
+    set_const(&key, &value);
+    format!("pub const {key}: &'static str = \"{value}\";").parse().unwrap()
+}
+
+
+/// load a constant from a .env file in your current directory.
+/// if you wish to use a different path to your .env file, make sure to first
+/// call `load_dot_env!("../other/path/.env");`
+#[proc_macro]
+pub fn const_from(item: TokenStream) -> TokenStream {
+    let mut iter = item.into_iter();
+    let key = if let proc_macro::TokenTree::Ident(id) = iter.next().expect("must provide an identifier") {
+        id.to_string()
+    } else {
+        panic!("const_from first parameter must be an identifier");
+    };
+    let punct = iter.next().expect("Unexpected end of parameters. Must provide 2 parameters to const_from!(). For example `const_from!(MY_VAR, \"my-value\")`");
+    if let proc_macro::TokenTree::Punct(_) = punct {
+    } else {
+        panic!("Expected punctuation ',', instead found {:?} token", punct);
+    }
+    let val = iter.next().expect("Unexpected end of parameters. Must provide 2 parameters to const_from!(). For example `const_from!(MY_VAR, \"my-value\")`");
+    let value = if let proc_macro::TokenTree::Literal(s) = val {
+        let mut s = s.to_string();
+        if s.starts_with('"') && s.ends_with('"') {
+            s.remove(0);
+            s.pop();
+        }
+        s
+    } else {
+        panic!("Expected string literal. Instead found {:?}", val);
+    };
+    set_const(&key, &value);
+    format!("pub const {key}: &'static str = \"{value}\";").parse().unwrap()
+}
+
+
+/// load a secret from a .env file in your current directory.
+/// if you wish to use a different path to your .env file, make sure to first
+/// call `load_dot_env!("../other/path/.env");`
+/// This call differs from `const_from_dot_env!()` because this call does
+/// not save this value as a constant that is available at runtime, but rather
+/// this value is only available at compile time.
+#[proc_macro]
+pub fn secret_from_dot_env(item: TokenStream) -> TokenStream {
+    let mut iter = item.into_iter();
+    let id = if let proc_macro::TokenTree::Ident(id) = iter.next().expect("must provide an identifier") {
+        id
+    } else {
+        panic!("secret_from_dot_env only accepts an identifier");
+    };
+    let mut value = "".into();
+    let key = id.to_string();
+    unsafe {
+        if DOT_ENV.is_none() {
+            load_dot_env_inner(".env".into());
+        }
+        if let Some(map) = &DOT_ENV {
+            if let Some(var) = map.get(&key) {
+                value = var.clone();
+            } else {
+                panic!("Failed to find {key} in loaded .env file");
+            }
+        } else {
+            panic!("Unexpected failure to read .env file");
+        }
+    }
+
+    set_const(&key, &value);
+    "".parse().unwrap()
+}
+
 #[proc_macro]
 pub fn close(_item: TokenStream) -> TokenStream {
     let var = env::var("RUSTFLAGS").ok();
@@ -305,10 +421,24 @@ pub fn close(_item: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn set_build_bucket(item: TokenStream) -> TokenStream {
     let mut iter = item.into_iter();
-    if let proc_macro::TokenTree::Literal(s) = iter.next().expect("must provide bucket to set_build_bukcet") {
-        unsafe {
-            BUILD_BUCKET = s.to_string();
+    let next = iter.next().expect("must provide bucket to set_build_bukcet");
+    match next {
+        TokenTree::Ident(id) => {
+            let key = id.to_string();
+            if let Some(val) = get_const(&key) {
+                unsafe {
+                    BUILD_BUCKET = val;
+                }
+            } else {
+                panic!("Failed to find value for '{key}'");
+            }
         }
+        TokenTree::Literal(s) => {
+            unsafe {
+                BUILD_BUCKET = s.to_string();
+            }
+        }
+        _ => panic!("Unexpected input to set_build_bucket. Must provide either constant, or a string literal"),
     }
     "".parse().unwrap()
 }
