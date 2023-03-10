@@ -3,14 +3,20 @@ use std::collections::HashMap;
 pub static mut DOT_ENV: Option<HashMap<String, String>> = None;
 pub static mut LOADED_CONSTS: Option<HashMap<String, String>> = None;
 
-pub fn load_dot_env_inner(mut path: String) {
+pub fn load_dot_env_inner(path: String) {
+    if let Err(e) = load_dot_env_inner_safe(path) {
+        panic!("{e}");
+    }
+}
+
+pub fn load_dot_env_inner_safe(mut path: String) -> Result<(), String> {
     if path.starts_with('"') && path.ends_with('"') {
         path.remove(0);
         path.pop();
     }
     let contents = match std::fs::read_to_string(&path) {
         Ok(contents) => contents,
-        Err(e) => panic!("Failed to load .env file {}: {}", path, e),
+        Err(e) => return Err(format!("Failed to load .env file {}: {}", path, e)),
     };
     let mut map = HashMap::new();
     for line in contents.lines() {
@@ -24,6 +30,7 @@ pub fn load_dot_env_inner(mut path: String) {
     unsafe {
         DOT_ENV = Some(map);
     }
+    Ok(())
 }
 
 pub fn set_const(key: &str, val: &str) {

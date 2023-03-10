@@ -61,13 +61,13 @@ pub fn create_static_website(attr: TokenStream, _item: TokenStream) -> TokenStre
     let bucket_domain = format!("{bucket_name}.s3-website-{region}.amazonaws.com");
 
     let out_stream: TokenStream = format!("
-#[create_s3({{
+#[hira::create_s3({{
     name: \"{bucket_name}\",
     public_website: {{}},
 }})]
 pub mod my_website_bucket {{}}
 
-#[create_cloudfront_distribution({{
+#[hira::create_cloudfront_distribution({{
     origins_and_behaviors: [{{
         domain_name: \"{bucket_domain}\",
     }}],
@@ -78,7 +78,7 @@ pub mod my_website_bucket {{}}
 pub mod my_cdn {{}}
 
 
-#[create_route53_record({{
+#[hira::create_route53_record({{
     record_type: \"A\",
     name: \"{url}\",
     alias_target_dns_name: \"!GetAtt {cdn_resource_name}.DomainName\",
@@ -317,7 +317,7 @@ pub fn const_from_dot_env_or_default(item: TokenStream) -> TokenStream {
     let key = id.to_string();
     unsafe {
         if DOT_ENV.is_none() {
-            load_dot_env_inner(".env".into());
+            let _ = load_dot_env_inner_safe(".env".into());
         }
         if let Some(map) = &DOT_ENV {
             if let Some(var) = map.get(&key) {
@@ -479,7 +479,10 @@ unsafe fn output_deployment_file() {
     }
     file.write_all("\n# package:\n".as_bytes()).expect("failed to write");
     let bucket = unsafe {&BUILD_BUCKET};
-    file.write_all(format!("aws s3 sync --size-only ./hira/out/ s3://{bucket}").as_bytes()).expect("failed to write");
+    // no need to sync if there are no build artifacts.
+    if !bucket.is_empty() {
+        file.write_all(format!("aws s3 sync --size-only ./hira/out/ s3://{bucket}").as_bytes()).expect("failed to write");
+    }
     for step in PACKAGE_COMMANDS.iter() {
         file.write_all(step.as_bytes()).expect("failed to write");
         file.write_all("\n".as_bytes()).expect("failed to write");
