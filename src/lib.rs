@@ -29,6 +29,15 @@ pub fn create_cloudfront_distribution(attr: TokenStream, item: TokenStream) -> T
     item
 }
 
+#[proc_macro_attribute]
+pub fn create_route53_record(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // TODO: handle parsing the module under the item, and add convenience functions
+    // to the module
+    let attr = parse_attributes(attr);
+    let conf: Route53RecordSet = attr.into();
+    add_route53_resource(conf);
+    item
+}
 
 #[proc_macro_attribute]
 pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
