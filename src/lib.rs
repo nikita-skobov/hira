@@ -35,6 +35,7 @@ pub async fn make_s3_client() -> aws_sdk_s3::Client {{
 }}"
     );
 
+    let should_invoke_init = module.contains_tokens("pub async fn _init()".parse().unwrap());
     module.add_to_body("use super::make_s3_client;".parse().unwrap());
     module.add_to_body(format!("
     pub async fn put_object_inner(
@@ -58,7 +59,22 @@ pub async fn make_s3_client() -> aws_sdk_s3::Client {{
         self::put_object_inner(&client, \"{bucket_name}\", key, data).await
     }}").parse().unwrap());
 
+    let module_name = module.module_name();
+    let main_str = format!("
+    #[cfg({module_name})]
+    #[tokio::main]
+    async fn main() -> Result<(), ()> {{
+        let _ = {module_name}::_init().await;
+        Ok(())
+    }}"
+    );
+
     let mut out = module.build();
+    if should_invoke_init {
+        let init_main = TokenStream::from_str(&main_str).unwrap();
+        add_post_cmd(format!("AWS_REGION={region} RUSTFLAGS=\"--cfg {module_name}\" cargo run --target-dir hira/cross-target-{module_name}"));
+        out.extend([init_main]);
+    }
     let client_func_stream = TokenStream::from_str(&client_func_str).unwrap();
     if should_output_client {
         out.extend([client_func_stream]);
@@ -550,6 +566,11 @@ unsafe fn output_deployment_file() {
     file.write_all(cmd.as_bytes()).expect("Failed to write");
     for step in DEPLOY_COMMANDS.iter() {
         file.write_all(step.as_bytes()).expect("failed to write");
+        file.write_all("\n".as_bytes()).expect("failed to write");
+    }
+    file.write_all("\n# post-deploy:\n".as_bytes()).expect("failed to write");
+    for post_cmd in POST_COMMANDS.iter() {
+        file.write_all(post_cmd.as_bytes()).expect("failed to write");
         file.write_all("\n".as_bytes()).expect("failed to write");
     }
     file.flush().expect("Failed to finish writing to file");

@@ -189,50 +189,57 @@ fn expect_group(d: Delimiter) -> TokenTree {
     TokenTree::Group(Group::new(d, TokenStream::new()))
 }
 
-fn assert_token(actual: &TokenTree, expected: &TokenTree, ignore_value: bool) -> String {
+fn does_match_token(actual: &TokenTree, expected: &TokenTree, ignore_value: bool) -> Result<String, String> {
     match (actual, expected) {
         (TokenTree::Group(a), TokenTree::Group(b)) => {
             if a.delimiter() != b.delimiter() {
                 panic!("Error parsing: Expected group with delimiter {:?}, Received {:?}", b.delimiter(), a);
             }
-            match a.delimiter() {
+            Ok(match a.delimiter() {
                 Delimiter::Parenthesis => "()".into(),
                 Delimiter::Brace => "{}".into(),
                 Delimiter::Bracket => "[]".into(),
                 Delimiter::None => "".into(),
-            }
+            })
         }
         (TokenTree::Ident(a), TokenTree::Ident(b)) => {
             // if we don't care the value inside, then we just care that the type matches
-            if ignore_value { return a.to_string() }
+            if ignore_value { return Ok(a.to_string()) }
             let expected_str = b.to_string();
             if a.to_string() != expected_str {
-                panic!("Error parsing: Expected identifier {:?}, Received {:?}", b, a);
+                return Err(format!("Error parsing: Expected identifier {:?}, Received {:?}", b, a));
             }
-            a.to_string()
+            Ok(a.to_string())
         }
         (TokenTree::Punct(a), TokenTree::Punct(b)) => {
             // if we don't care the value inside, then we just care that the type matches
-            if ignore_value { return a.to_string() }
+            if ignore_value { return Ok(a.to_string()) }
             let expected_char = b.as_char();
             if a.as_char() != expected_char {
-                panic!("Error parsing: Expected punctuation {:?}, Received {:?}", expected_char, a.as_char());
+                return Err(format!("Error parsing: Expected punctuation {:?}, Received {:?}", expected_char, a.as_char()));
             }
-            a.to_string()
+            Ok(a.to_string())
         }
         (TokenTree::Literal(a), TokenTree::Literal(b)) => {
             // if we don't care the value inside, then we just care that the type matches
-            if ignore_value { return a.to_string() }
+            if ignore_value { return Ok(a.to_string()) }
             let expected_str = b.to_string();
             if a.to_string() != expected_str {
-                panic!("Error parsing: Expected literal {:?}, Received {:?}", expected_str, a.to_string());
+                return Err(format!("Error parsing: Expected literal {:?}, Received {:?}", expected_str, a.to_string()));
             }
-            a.to_string()
+            Ok(a.to_string())
         }
         // otherwise we know it's wrong because the type is wrong
         _ => {
-            panic!("Error parsing: Expected {:?}, Received {:?}", expected, actual);
+            Err(format!("Error parsing: Expected {:?}, Received {:?}", expected, actual))
         }
+    }
+}
+
+fn assert_token(actual: &TokenTree, expected: &TokenTree, ignore_value: bool) -> String {
+    match does_match_token(actual, expected, ignore_value) {
+        Ok(out) => out,
+        Err(e) => panic!("{e}"),
     }
 }
 
@@ -399,6 +406,36 @@ impl ModDef {
             new_group.set_span(span);
             self.mod_body = TokenTree::Group(new_group);
         }
+    }
+    pub fn module_name(&self) -> String {
+        if let proc_macro::TokenTree::Ident(id) = &self.mod_name_ident {
+            return id.to_string();
+        } else {
+            panic!("Module missing name");
+        }
+    }
+    pub fn contains_tokens(&self, token_stream: TokenStream) -> bool {
+        let mut match_tokens = vec![];
+        for token in token_stream {
+            match_tokens.push(token);
+        }
+        let mut match_index = 0;
+        let mut expect = &match_tokens[match_index];
+        if let proc_macro::TokenTree::Group(g) = &self.mod_body {
+            for token in g.stream() {
+                if does_match_token(&token, &expect, false).is_ok() {
+                    match_index += 1;
+                    if match_index >= match_tokens.len() {
+                        return true;
+                    }
+                    expect = &match_tokens[match_index];
+                } else {
+                    match_index = 0;
+                    expect = &match_tokens[match_index];
+                }
+            }
+        }
+        false
     }
 }
 
