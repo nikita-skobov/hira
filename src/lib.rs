@@ -493,7 +493,7 @@ unsafe fn output_deployment_file() {
     if stack_name.is_empty() {
         stack_name = env::var("CARGO_BIN_NAME").expect("No stack name provided, and failed to use cargo bin name as stack name");
     }
-    let mut cmd = format!("AWS_REGION={region} aws --region {region} cloudformation deploy --stack-name {stack_name} --template-file ./deploy.yml --capabilities CAPABILITY_NAMED_IAM");
+    let mut cmd = format!("AWS_REGION={region} aws --region {region} cloudformation deploy --stack-name {stack_name} --template-file ./hira/deploy.yml --capabilities CAPABILITY_NAMED_IAM");
     if !PARAMETER_VALUES.is_empty() {
         cmd.push_str(" --parameter-overrides ");
         for (key, value) in &PARAMETER_VALUES {
@@ -516,7 +516,8 @@ unsafe fn output_deployment_file() {
 }
 
 unsafe fn output_cloudformation_yml() {
-    let mut file = std::fs::File::create("./deploy.yml").expect("Failed to create deploy.yml file");
+    let _ = std::fs::create_dir("./hira");
+    let mut file = std::fs::File::create("./hira/deploy.yml").expect("Failed to create deploy.yml file");
     file.write_all("AWSTemplateFormatVersion: '2010-09-09'\n".as_bytes()).expect("failed to write");
     if !PARAMETER_VALUES.is_empty() {
         file.write_all("Parameters:\n".as_bytes()).expect("failed to write");
