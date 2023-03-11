@@ -40,23 +40,23 @@ pub async fn make_s3_client() -> aws_sdk_s3::Client {{
     module.add_to_body(format!("
     pub async fn put_object_inner(
         client: &aws_sdk_s3::Client,
-        bucket: &str,
         key: &str,
         data: Vec<u8>,
     ) -> Result<(), aws_sdk_s3::Error> {{
+        self::put_object_builder(client, key, data).send().await?;
+        Ok(())
+    }}
+    pub fn put_object_builder(client: &aws_sdk_s3::Client, key: &str, data: Vec<u8>) -> aws_sdk_s3::client::fluent_builders::PutObject {{
         let b = aws_sdk_s3::types::ByteStream::from(data);
         client
             .put_object()
-            .bucket(bucket)
+            .bucket(\"{bucket_name}\")
             .key(key)
             .body(b)
-            .send()
-            .await?;
-        Ok(())
     }}
     pub async fn put_object(key: &str, data: Vec<u8>) -> Result<(), aws_sdk_s3::Error> {{
         let client = make_s3_client().await;
-        self::put_object_inner(&client, \"{bucket_name}\", key, data).await
+        self::put_object_inner(&client, key, data).await
     }}").parse().unwrap());
 
     let module_name = module.module_name();
