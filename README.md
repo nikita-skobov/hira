@@ -76,11 +76,11 @@ cargo build
 - [X] cargo build can save cache between invocations
 - [ ] Modular extensability: allow users to create their own cloud macros easily
 - [ ] JSON Templates instead of yaml
-- [ ] Example: Make an S3 website w/ custom domain
+- [X] Example: Make an S3 website w/ custom domain
 - [ ] Example: simple game that saves state in DynamoDB
 - [ ] Static analysis to generate necessary permissions
 - [ ] Custom "panic" handler plugin
 - [ ] hira-server: setup server architecture using hira itself. hira-server uses fast parallelized EC2 containers and can cache previous builds for fast deploys.
 - [ ] Example: lambda can create an ec2 by calling its function.
-- [ ] Environment variable + const tracking
-- [ ] Move all artifacts to use /hira folder
+- [X] Environment variable + const tracking
+- [X] Move all artifacts to use /hira folder
