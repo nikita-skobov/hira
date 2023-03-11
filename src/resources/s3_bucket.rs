@@ -1,5 +1,6 @@
 use super::*;
 
+pub static mut CREATED_S3: bool = false;
 
 pub struct PublicWebsite {
     pub index_document: String,

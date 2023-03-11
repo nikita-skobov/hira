@@ -360,6 +360,78 @@ impl FuncDef {
     }
 }
 
+#[derive(Debug)]
+pub struct ModDef {
+    pub pub_ident: Option<TokenTree>,
+    pub mod_ident: TokenTree,
+    pub mod_name_ident: TokenTree,
+    pub mod_body: TokenTree,
+}
+
+impl Default for ModDef {
+    fn default() -> Self {
+        Self {
+            pub_ident: None,
+            mod_ident: expect_ident("fn"),
+            mod_name_ident: expect_ident("fn"),
+            mod_body: expect_ident("fn"),
+        }
+    }
+}
+
+impl ModDef {
+    pub fn build(self) -> TokenStream {
+        let mut out = TokenStream::new();
+        if let Some(id) = self.pub_ident {
+            out.extend([id]);
+        }
+        out.extend([self.mod_ident]);
+        out.extend([self.mod_name_ident]);
+        out.extend([self.mod_body]);
+        out
+    }
+    pub fn add_to_body(&mut self, add: TokenStream) {
+        if let proc_macro::TokenTree::Group(g) = &mut self.mod_body {
+            let mut old_body = g.stream();
+            let span = g.span();
+            old_body.extend(add);
+            let mut new_group = Group::new(Delimiter::Brace, old_body);
+            new_group.set_span(span);
+            self.mod_body = TokenTree::Group(new_group);
+        }
+    }
+}
+
+pub fn parse_mod_def(token_stream: TokenStream) -> ModDef {
+    let mut out = ModDef::default();
+    let mut iter = token_stream.into_iter();
+    let generic_err = "Error parsing: Unexpected end of token stream. This can only be applied to modules. Are you sure you added this macro attribute to a module?";
+    let mut next = iter.next().expect(generic_err);
+    let mut expect = expect_ident("pub");
+    let actual_ident = assert_token(&next, &expect, true);
+    if actual_ident == "pub" {
+        out.pub_ident = Some(next);
+        next = iter.next().expect(generic_err);
+        expect = expect_ident("mod");
+        assert_token(&next, &expect, false);
+        out.mod_ident = next;
+    } else if actual_ident == "mod" {
+        out.mod_ident = next;
+    } else {
+        panic!("Unexpected identifier parsing module: {:?}", next);
+    }
+    // we expect this to be the name of the module
+    next = iter.next().expect(generic_err);
+    assert_token(&next, &expect, true);
+    out.mod_name_ident = next;
+    // now we expect the mod body, so it should be a group
+    expect = expect_group(Delimiter::Brace);
+    next = iter.next().expect(generic_err);
+    assert_token(&next, &expect, false);
+    out.mod_body = next;
+    out
+}
+
 pub fn parse_func_def(token_stream: TokenStream, assert_async: bool) -> FuncDef {
     let mut out = FuncDef::default();
     let mut expect = expect_ident("async");

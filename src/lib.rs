@@ -12,12 +12,59 @@ use variables::*;
 
 #[proc_macro_attribute]
 pub fn create_s3(attr: TokenStream, item: TokenStream) -> TokenStream {
-    // TODO: handle parsing the module under the item, and add convenience functions
-    // to the module
+    let mut module = parse_mod_def(item);
     let attr = parse_attributes(attr);
     let s3_conf: S3Bucket = attr.into();
+
+    let mut should_output_client = false;
+    unsafe {
+        if !CREATED_S3 {
+            CREATED_S3 = true;
+            should_output_client = true;
+        }
+    }
+    let region = unsafe { &DEPLOY_REGION };
+    let bucket_name = &s3_conf.name;
+
+    let client_func_str = format!("
+// TODO: save the client somehow. dont re-create for each request...
+pub async fn make_s3_client() -> aws_sdk_s3::Client {{
+    let region_provider = aws_config::meta::region::RegionProviderChain::default_provider().or_else({region});
+    let sdk_config = aws_config::from_env().region(region_provider).load().await;
+    aws_sdk_s3::Client::new(&sdk_config)
+}}"
+    );
+
+    module.add_to_body("use super::make_s3_client;".parse().unwrap());
+    module.add_to_body(format!("
+    pub async fn put_object_inner(
+        client: &aws_sdk_s3::Client,
+        bucket: &str,
+        key: &str,
+        data: Vec<u8>,
+    ) -> Result<(), aws_sdk_s3::Error> {{
+        let b = aws_sdk_s3::types::ByteStream::from(data);
+        client
+            .put_object()
+            .bucket(bucket)
+            .key(key)
+            .body(b)
+            .send()
+            .await?;
+        Ok(())
+    }}
+    pub async fn put_object(key: &str, data: Vec<u8>) -> Result<(), aws_sdk_s3::Error> {{
+        let client = make_s3_client().await;
+        self::put_object_inner(&client, \"{bucket_name}\", key, data).await
+    }}").parse().unwrap());
+
+    let mut out = module.build();
+    let client_func_stream = TokenStream::from_str(&client_func_str).unwrap();
+    if should_output_client {
+        out.extend([client_func_stream]);
+    }
     add_s3_bucket_resource(s3_conf);
-    item
+    out
 }
 
 #[proc_macro_attribute]
