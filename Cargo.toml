@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+rhai = "1.12.0"
 
+# TODO: remove comment to be more accurate to how dependencies work w/ hira.
 # this crate has no dependencies, as it's just a proc-macro crate, but these need
 # to be included in your crate's dependencies:
 #tokio = { version = "1.0", features = ["macros","io-util","sync","rt-multi-thread"] }
