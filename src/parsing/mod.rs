@@ -5,7 +5,7 @@ pub use proc_macro::{TokenTree, TokenStream, Ident, Span, Punct, Delimiter, Grou
 use crate::variables::get_const;
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AttributeValue {
     Str(String),
     List(Vec<AttributeValue>),
@@ -36,6 +36,12 @@ impl AttributeValue {
                 panic!("Expected list type at {}. Instead found {:?}", key, self);
             }
         }
+    }
+}
+
+impl From<TokenStream> for AttributeValue {
+    fn from(value: TokenStream) -> Self {
+        parse_attributes(value)
     }
 }
 
@@ -237,10 +243,14 @@ fn does_match_token(actual: &TokenTree, expected: &TokenTree, ignore_value: bool
 }
 
 fn assert_token(actual: &TokenTree, expected: &TokenTree, ignore_value: bool) -> String {
-    match does_match_token(actual, expected, ignore_value) {
+    match assert_token_safe(actual, expected, ignore_value) {
         Ok(out) => out,
         Err(e) => panic!("{e}"),
     }
+}
+
+fn assert_token_safe(actual: &TokenTree, expected: &TokenTree, ignore_value: bool) -> Result<String, String> {
+    does_match_token(actual, expected, ignore_value)
 }
 
 #[derive(Debug)]
@@ -440,79 +450,86 @@ impl ModDef {
 }
 
 pub fn parse_mod_def(token_stream: TokenStream) -> ModDef {
+    match parse_mod_def_safe(token_stream) {
+        Ok(o) => o,
+        Err(e) => panic!("{e}"),
+    }
+}
+
+pub fn parse_mod_def_safe(token_stream: TokenStream) -> Result<ModDef, String> {
     let mut out = ModDef::default();
     let mut iter = token_stream.into_iter();
     let generic_err = "Error parsing: Unexpected end of token stream. This can only be applied to modules. Are you sure you added this macro attribute to a module?";
-    let mut next = iter.next().expect(generic_err);
+    let mut next = iter.next().ok_or_else(|| generic_err)?;
     let mut expect = expect_ident("pub");
-    let actual_ident = assert_token(&next, &expect, true);
+    let actual_ident = assert_token_safe(&next, &expect, true)?;
     if actual_ident == "pub" {
         out.pub_ident = Some(next);
-        next = iter.next().expect(generic_err);
+        next = iter.next().ok_or_else(|| generic_err)?;
         expect = expect_ident("mod");
-        assert_token(&next, &expect, false);
+        assert_token_safe(&next, &expect, false)?;
         out.mod_ident = next;
     } else if actual_ident == "mod" {
         out.mod_ident = next;
     } else {
-        panic!("Unexpected identifier parsing module: {:?}", next);
+        return Err(format!("Unexpected identifier parsing module: {:?}", next));
     }
     // we expect this to be the name of the module
-    next = iter.next().expect(generic_err);
-    assert_token(&next, &expect, true);
+    next = iter.next().ok_or_else(|| generic_err)?;
+    assert_token_safe(&next, &expect, true)?;
     out.mod_name_ident = next;
     // now we expect the mod body, so it should be a group
     expect = expect_group(Delimiter::Brace);
-    next = iter.next().expect(generic_err);
-    assert_token(&next, &expect, false);
+    next = iter.next().ok_or_else(|| generic_err)?;
+    assert_token_safe(&next, &expect, false)?;
     out.mod_body = next;
-    out
+    Ok(out)
 }
 
-pub fn parse_func_def(token_stream: TokenStream, assert_async: bool) -> FuncDef {
+pub fn parse_func_def_safe(token_stream: TokenStream, assert_async: bool) -> Result<FuncDef, String> {
     let mut out = FuncDef::default();
     let mut expect = expect_ident("async");
     let mut iter = token_stream.into_iter();
     let generic_err = "Error parsing: Unexpected end of token stream. This can only be applied to functions. Are you sure you added this macro attribute to a function?";
-    let mut next = iter.next().expect(generic_err);
+    let mut next = iter.next().ok_or_else(|| generic_err)?;
     // this can either be fn or async
-    let actual_ident = assert_token(&next, &expect, true);
+    let actual_ident = assert_token_safe(&next, &expect, true)?;
     if actual_ident == "async" {
         out.fn_async_ident = Some(next);
-        next = iter.next().expect(generic_err);
+        next = iter.next().ok_or_else(|| generic_err)?;
         expect = expect_ident("fn");
-        assert_token(&next, &expect, false);
+        assert_token_safe(&next, &expect, false)?;
         out.fn_ident = next;
     } else {
         out.fn_ident = next;
     }
     if assert_async {
         if out.fn_async_ident.is_none() {
-            panic!("This function must be async");
+            return Err(format!("This function must be async"));
         }
     }
     expect = expect_ident("fn"); // we expect next to be the name of the function
-    next = iter.next().expect(generic_err);
-    assert_token(&next, &expect, true);
+    next = iter.next().ok_or_else(|| generic_err)?;
+    assert_token_safe(&next, &expect, true)?;
     out.fn_name = next;
     expect = expect_group(Delimiter::Parenthesis);
-    next = iter.next().expect(generic_err);
-    assert_token(&next, &expect, false);
+    next = iter.next().ok_or_else(|| generic_err)?;
+    assert_token_safe(&next, &expect, false)?;
     out.fn_params = next;
-    next = iter.next().expect(generic_err);
+    next = iter.next().ok_or_else(|| generic_err)?;
     // next can either be punctuation for the return type, or the body of the function def
     match &next {
         TokenTree::Punct(p) => {
             if p.as_char() != '-' { panic!("Error parsing: Expected punctuation '-', instead found {:?}", p) }
             out.fn_return_punct.push(next);
-            next = iter.next().expect(generic_err);
+            next = iter.next().ok_or_else(|| generic_err)?;
             if let proc_macro::TokenTree::Punct(p) = &next {
                 if p.as_char() != '>' { panic!("Error parsing: Expected punctuation '-', instead found {:?}", p) }
             }
             out.fn_return_punct.push(next);
             // now we parse the return type.
             loop {
-                next = iter.next().expect(generic_err);
+                next = iter.next().ok_or_else(|| generic_err)?;
                 if let proc_macro::TokenTree::Group(g) = &next {
                     // if it's a group with delimiter Brace, that means
                     // it's the function body
@@ -530,9 +547,16 @@ pub fn parse_func_def(token_stream: TokenStream, assert_async: bool) -> FuncDef 
             out.fn_body = next;
         }
         _ => {
-            panic!("Error parsing: Expected return type for function. Instead found {:?}", next);
+            return Err(format!("Error parsing: Expected return type for function. Instead found {:?}", next));
         }
     }
 
-    out
+    Ok(out)
+}
+
+pub fn parse_func_def(token_stream: TokenStream, assert_async: bool) -> FuncDef {
+    match parse_func_def_safe(token_stream, assert_async) {
+        Ok(o) => o,
+        Err(e) => panic!("{e}"),
+    }
 }
