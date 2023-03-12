@@ -10,6 +10,9 @@ use resources::*;
 mod variables;
 use variables::*;
 
+mod module_scripting;
+use module_scripting::*;
+
 #[proc_macro_attribute]
 pub fn create_s3(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut module = parse_mod_def(item);
@@ -103,6 +106,33 @@ pub fn create_route53_record(attr: TokenStream, item: TokenStream) -> TokenStrea
     let conf: Route53RecordSet = attr.into();
     add_route53_resource(conf);
     item
+}
+
+#[proc_macro_attribute]
+pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let module_input = match module_scripting::get_module_input(attr) {
+        Ok(m) => m,
+        Err(e) => panic!("{e}"),
+    };
+    let err_as_func = match parse_func_def_safe(item.clone(), false) {
+        Ok(func_def) => {
+            if let Err(e) = module_scripting::run_module_func_def(&module_input, &func_def) {
+                panic!("{e}");
+            }
+            return item;
+        }
+        Err(e) => e,
+    };
+    let err_as_mod = match parse_mod_def_safe(item.clone()) {
+        Ok(mod_def) => {
+            if let Err(e) = module_scripting::run_module_mod_def(&module_input, &mod_def) {
+                panic!("{e}");
+            }
+            return item;
+        }
+        Err(e) => e,
+    };
+    panic!("hira::module can only be used on functions or rust modules. Parsing errors:\nError parsing as func: {err_as_func}\nError parsing as mod: {err_as_mod}");
 }
 
 #[proc_macro_attribute]
