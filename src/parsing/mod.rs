@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 pub use proc_macro::{TokenTree, TokenStream, Ident, Span, Punct, Delimiter, Group};
 
-use crate::variables::get_const;
+use super::variables::get_const;
 
 
 #[derive(Debug, Clone)]
@@ -199,7 +199,7 @@ fn does_match_token(actual: &TokenTree, expected: &TokenTree, ignore_value: bool
     match (actual, expected) {
         (TokenTree::Group(a), TokenTree::Group(b)) => {
             if a.delimiter() != b.delimiter() {
-                panic!("Error parsing: Expected group with delimiter {:?}, Received {:?}", b.delimiter(), a);
+                return Err(format!("Error parsing: Expected group with delimiter {:?}, Received {:?}", b.delimiter(), a));
             }
             Ok(match a.delimiter() {
                 Delimiter::Parenthesis => "()".into(),
@@ -253,7 +253,7 @@ fn assert_token_safe(actual: &TokenTree, expected: &TokenTree, ignore_value: boo
     does_match_token(actual, expected, ignore_value)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FuncDef {
     pub fn_async_ident: Option<TokenTree>,
     pub fn_ident: TokenTree,
@@ -377,7 +377,7 @@ impl FuncDef {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ModDef {
     pub pub_ident: Option<TokenTree>,
     pub mod_ident: TokenTree,
@@ -520,11 +520,11 @@ pub fn parse_func_def_safe(token_stream: TokenStream, assert_async: bool) -> Res
     // next can either be punctuation for the return type, or the body of the function def
     match &next {
         TokenTree::Punct(p) => {
-            if p.as_char() != '-' { panic!("Error parsing: Expected punctuation '-', instead found {:?}", p) }
+            if p.as_char() != '-' { return Err(format!("Error parsing: Expected punctuation '-', instead found {:?}", p)) }
             out.fn_return_punct.push(next);
             next = iter.next().ok_or_else(|| generic_err)?;
             if let proc_macro::TokenTree::Punct(p) = &next {
-                if p.as_char() != '>' { panic!("Error parsing: Expected punctuation '-', instead found {:?}", p) }
+                if p.as_char() != '>' { return Err(format!("Error parsing: Expected punctuation '-', instead found {:?}", p)) }
             }
             out.fn_return_punct.push(next);
             // now we parse the return type.

@@ -1,10 +1,46 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug, str::FromStr};
 
 use proc_macro::{TokenStream, Delimiter};
-use rhai::{Engine, AST, Scope, Map, Dynamic, ImmutableString};
+use rhai::{Engine, AST, Scope, Map, Dynamic};
 
 use crate::resources::{AttributeValue, FuncDef, ModDef};
 
+#[derive(Clone, Debug)]
+pub enum RhaiObject {
+    Mod { settings: GlobalSettings, def: ModDef },
+    Func { settings: GlobalSettings, def: FuncDef },
+}
+
+impl RhaiObject {
+    pub fn get_settings<T, F: FnMut(&mut GlobalSettings) -> T>(&mut self, mut cb: F) -> T {
+        match self {
+            RhaiObject::Mod { settings, .. } |
+            RhaiObject::Func { settings, .. } => {
+                cb(settings)
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct GlobalSettings {
+    pub add_code_outside: Vec<TokenStream>,
+}
+
+impl RhaiObject {
+    pub fn build_engine(&self, eng: &mut Engine) {
+        // always provide these functions: they are valid regardless of
+        // mod, or func defs.
+        eng.register_fn("add_code_outside", |obj: &mut RhaiObject, s: &str| -> Result<(), String> {
+            obj.get_settings(|settings| {
+                let stream = TokenStream::from_str(s)
+                    .map_err(|e| format!("Error creating TokenStream in `add_code_outside` from {s}. {e}"))?;
+                settings.add_code_outside.push(stream);
+                Ok(())
+            })
+        });
+    }
+}
 
 pub struct ModuleInput {
     pub module_name: String,
@@ -75,24 +111,37 @@ pub fn create_module_scope(input: &ModuleInput) -> Scope {
     out
 }
 
-pub fn run_module_mod_def(input: &ModuleInput, mod_def: &ModDef) -> Result<(), String> {
-    let (eng, ast) = resolve_module(&input.module_name)?;
+pub fn run_module(input: &ModuleInput, fn_name: &str, item: RhaiObject) -> Result<RhaiObject, String> {
+    let (mut eng, ast) = resolve_module(&input.module_name)?;
     let mut scope = create_module_scope(input);
-    match eng.run_ast_with_scope(&mut scope, &ast) {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            return Err(format!("Failed to run module {}. {e}", input.module_name));
+    item.build_engine(&mut eng);
+
+    let mut has_mod_macro_fn = false;
+    let desired_param_count = 1;
+    for fndef in ast.iter_functions() {
+        if fndef.name == fn_name {
+            has_mod_macro_fn = true;
+            if fndef.params.len() != desired_param_count {
+                return Err(format!("fn {fn_name}() {{}} was found but it takes {} parameters, expected {}", fndef.params.len(), desired_param_count));
+            }
         }
     }
-}
+    if !has_mod_macro_fn {
+        return Err(format!("hira::module '{}' is missing a fn {fn_name}(x) {{}} function.", input.module_name));
+    }
 
-pub fn run_module_func_def(input: &ModuleInput, func_def: &FuncDef) -> Result<(), String> {
-    let (eng, ast) = resolve_module(&input.module_name)?;
-    let mut scope = create_module_scope(input);
-    match eng.run_ast_with_scope(&mut scope, &ast) {
-        Ok(_) => Ok(()),
+    match eng.call_fn::<RhaiObject>(&mut scope, &ast, fn_name, (item, )) {
+        Ok(m) => {
+            println!("{:#?}", m);
+            Ok(m)
+        }
         Err(e) => {
-            return Err(format!("Failed to run module {}. {e}", input.module_name));
+            match *e {
+                rhai::EvalAltResult::ErrorMismatchOutputType(_, _, _) => {
+                    Err(format!("Error in module '{}'. fn {fn_name}(x) {{ }} must return the first input parameter", input.module_name))
+                }
+                _ => Err(format!("Error running module '{}': {}", input.module_name, e)),
+            }
         }
     }
 }

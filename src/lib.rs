@@ -114,25 +114,42 @@ pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(m) => m,
         Err(e) => panic!("{e}"),
     };
+    // try parsing it as a function, or as a module:
     let err_as_func = match parse_func_def_safe(item.clone(), false) {
         Ok(func_def) => {
-            if let Err(e) = module_scripting::run_module_func_def(&module_input, &func_def) {
-                panic!("{e}");
+            match run_module(&module_input, "func_macro", RhaiObject::Func {def: func_def, settings: Default::default() }) {
+                Err(e) => panic!("{e}"),
+                Ok(o) => {
+                    return finalize_module(o);
+                }
             }
-            return item;
         }
         Err(e) => e,
     };
     let err_as_mod = match parse_mod_def_safe(item.clone()) {
         Ok(mod_def) => {
-            if let Err(e) = module_scripting::run_module_mod_def(&module_input, &mod_def) {
-                panic!("{e}");
+            match run_module(&module_input, "mod_macro", RhaiObject::Mod{ def: mod_def, settings: Default::default() }) {
+                Err(e) => panic!("{e}"),
+                Ok(o) => {
+                    return finalize_module(o);
+                }
             }
-            return item;
         }
         Err(e) => e,
     };
     panic!("hira::module can only be used on functions or rust modules. Parsing errors:\nError parsing as func: {err_as_func}\nError parsing as mod: {err_as_mod}");
+}
+
+fn finalize_module(obj: RhaiObject) -> TokenStream {
+    let (settings, mut out_stream) = match obj {
+        RhaiObject::Mod { settings, def } => (settings, def.build()),
+        RhaiObject::Func { settings, def } => (settings, def.build()),
+    };
+
+    for outside_stream in settings.add_code_outside {
+        out_stream.extend(outside_stream);
+    }
+    out_stream
 }
 
 #[proc_macro_attribute]
