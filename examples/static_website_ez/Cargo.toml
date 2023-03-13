@@ -15,4 +15,5 @@ serde = { version = "1.0", features = ["derive"]}
 
 # these dependencies are necessary for lambda functions
 aws-sdk-lambda = "0.24.0"
+aws-sdk-s3 = "0.24.0"
 aws-config = "0.54.1"
