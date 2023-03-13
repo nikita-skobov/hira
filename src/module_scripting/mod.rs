@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}, fmt::Debug, str::FromStr};
 use proc_macro2::{TokenStream, Delimiter, TokenTree};
 use rhai::{Engine, AST, Scope, Map, Dynamic};
 
-use crate::resources::{AttributeValue, FuncDef, ModDef};
+use crate::resources::{AttributeValue, FuncDef, ModDef, RESOURCES, add_post_cmd, DEPLOY_REGION};
 
 #[derive(Clone, Debug)]
 pub enum RhaiObject {
@@ -61,6 +61,17 @@ impl RhaiObject {
     pub fn build_engine(&self, eng: &mut Engine) {
         // always provide these functions: they are valid regardless of
         // mod, or func defs.
+        eng.register_fn("add_to_cfn", |s: &str| {
+            // TODO: i wonder if theres a better API for this.. its incredibly hacky...
+            unsafe {
+                RESOURCES.push(s.into());
+            }
+        });
+        eng.register_fn("add_post_build_command", |s: &str| {
+            // TODO: theres ways to make this safer. for eg: only allow some types of
+            // commands such as cargo build and cargo run. and enforce it being separated by a cfg()...
+            add_post_cmd(s);
+        });
         eng.register_fn("add_code_after", |obj: &mut RhaiObject, s: &str| -> Result<(), String> {
             obj.get_settings(|settings| {
                 // important: ensure no functions added after are the same otherwise the build
@@ -184,6 +195,18 @@ pub fn create_module_scope(input: &ModuleInput) -> Scope {
     out.push("HIRA_MOD_NAME", input.module_name.clone());
     let rhai_map = attribute_map_to_rhai_map(&input.module_json);
     out.push("HIRA_MOD_INPUT", rhai_map);
+    unsafe {
+        let mut region = format!("{}", &DEPLOY_REGION);
+        loop {
+            if region.starts_with('"') && region.ends_with('"') {
+                region.remove(0);
+                region.pop();
+            } else {
+                break;
+            }
+        }
+        out.push("HIRA_DEPLOY_REGION", region.clone());
+    }
     out
 }
 
