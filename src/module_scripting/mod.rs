@@ -12,6 +12,21 @@ pub enum RhaiObject {
 }
 
 impl RhaiObject {
+    pub fn build(self) -> (GlobalSettings, TokenStream) {
+        let (settings, stream) = match self {
+            RhaiObject::Mod { settings, def } => (settings, def.build()),
+            RhaiObject::Func { settings, def } => (settings, def.build()),
+        };
+        let mut out_stream = TokenStream::new();
+        for before in &settings.add_code_before {
+            out_stream.extend(before.clone());
+        }
+        out_stream.extend(stream);
+        for outside_stream in &settings.add_code_after {
+            out_stream.extend(outside_stream.clone());
+        }
+        (settings, out_stream)
+    }
     pub fn get_settings<T, F: FnMut(&mut GlobalSettings) -> T>(&mut self, mut cb: F) -> T {
         match self {
             RhaiObject::Mod { settings, .. } |
@@ -256,5 +271,26 @@ mod test {
         let obj = run_module(&input, "mod_macro", RhaiObject::Mod { settings: Default::default(), def }).unwrap();
         let def = obj.assert_mod();
         assert_eq!(def.get_module_name(), "renamed");
+    }
+
+    #[test]
+    fn can_add_code_before_and_after() {
+        let input = ModuleInput {
+            module_name: "./src/module_scripting/test_fixtures/can_add_code_before_and_after.rhai".into(),
+            module_json: Default::default(),
+        };
+        let rust_code = TokenStream::from_str("fn myfunc() {}").unwrap();
+        let def = parse_func_def_safe(rust_code, false).unwrap();
+        let obj = run_module(&input, "func_macro", RhaiObject::Func { settings: Default::default(), def }).unwrap();
+        let (_, token_stream) = obj.build();
+        let s = token_stream.to_string();
+        assert_eq!(s, "# [cfg (hello)] fn myfunc () { } fn generatedfn () { }");
+
+        let rust_code = TokenStream::from_str("mod mymod {}").unwrap();
+        let def = parse_mod_def_safe(rust_code).unwrap();
+        let obj = run_module(&input, "mod_macro", RhaiObject::Mod { settings: Default::default(), def }).unwrap();
+        let (_, token_stream) = obj.build();
+        let s = token_stream.to_string();
+        assert_eq!(s, "# [cfg (hello)] mod mymod { } fn generatedfn () { }");
     }
 }
