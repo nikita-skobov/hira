@@ -245,7 +245,11 @@ pub fn run_module(input: &ModuleInput, fn_name: &str, item: RhaiObject) -> Resul
         return Err(format!("hira::module '{}' is missing a fn {fn_name}(x) {{}} function.", input.module_name));
     }
 
-    match eng.call_fn::<RhaiObject>(&mut scope, &ast, fn_name, (item, )) {
+    // necessary to allow the scope to persist if the user
+    // wants to call different functions within their module.
+    let options = rhai::CallFnOptions::default()
+        .rewind_scope(false).eval_ast(false);
+    match eng.call_fn_with_options::<RhaiObject>(options, &mut scope, &ast, fn_name, (item, )) {
         Ok(m) => {
             Ok(m)
         }

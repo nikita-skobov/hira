@@ -9,6 +9,9 @@ fn mod_macro(x) {
     if HIRA_MOD_INPUT.contains("access_control") {
         access_control = HIRA_MOD_INPUT.access_control;
     }
+    if "public_website" in HIRA_MOD_INPUT {
+        access_control = "PublicRead";
+    }
 
     x.add_code_after(`
     // TODO: save the client somehow. dont re-create for each request...
@@ -62,7 +65,112 @@ fn mod_macro(x) {
         Properties:
             AccessControl: ${access_control}
             BucketName: ${bucket_name}
+${website(HIRA_MOD_INPUT, module_name)}
+${custom_cleanup_resources(HIRA_MOD_INPUT, module_name)}
     `);
 
     x
+}
+
+fn website(mod_input, module_name) {
+    if !("public_website" in mod_input) {
+        return "";
+    }
+    let index_document = "index.html";
+    let error_document = "error.html";
+    if "index_document" in mod_input.public_website {
+        index_document = mod_input.public_website.index_document;
+    }
+    if "error_document" in mod_input.public_website {
+        error_document = mod_input.public_website.error_document;
+    }
+
+    let resource_name = `Bucket${module_name}`;
+    let s3_resource_ref = "${" + resource_name + "}";
+    return `
+            WebsiteConfiguration:
+                IndexDocument: ${index_document}
+                ErrorDocument: ${error_document}
+    S3BucketWebsitePolicy${module_name}:
+        Type: AWS::S3::BucketPolicy
+        Properties:
+            Bucket: !Ref ${resource_name}
+            PolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                    - Action: 's3:GetObject'
+                      Effect: Allow
+                      Principal: '*'
+                      Resource: !Sub 'arn:aws:s3:::${s3_resource_ref}/*'
+    `;
+}
+
+fn custom_cleanup_resources(mod_input, module_name) {
+    if "no_custom_cleanup" in mod_input {
+        return "";
+    }
+    let s3_resource_name = `Bucket${module_name}`;
+    let s3_resource_name = "${" + s3_resource_name + "}";
+    return `
+    S3DeleteLambdaRole${module_name}:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                - Effect: Allow
+                  Principal:
+                      Service: lambda.amazonaws.com
+                  Action:
+                  - sts:AssumeRole
+            ManagedPolicyArns:
+            - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+            Policies:
+            - PolicyName: lambda_generated_policy
+              PolicyDocument:
+                  Version: '2012-10-17'
+                  Statement:
+                    - Effect: Allow
+                      Action:
+                      - s3:DeleteObject
+                      - s3:ListBucket
+                      Resource:
+                      - !Sub 'arn:aws:s3:::${s3_resource_name}/*'
+                      - !Sub 'arn:aws:s3:::${s3_resource_name}'
+    S3DeleteLambda${module_name}:
+        Type: AWS::Lambda::Function
+        Properties:
+            Runtime: nodejs12.x
+            Role: !GetAtt S3DeleteLambdaRole${module_name}.Arn
+            Handler: index.handler
+            Code:
+                ZipFile: |
+                    var AWS = require('aws-sdk')
+                    var response = require('cfn-response')
+                    const s3 = new AWS.S3({});
+                    async function listObjects(bucketName) {
+                        const data = await s3.listObjects({ Bucket: bucketName }).promise();
+                        const objects = data.Contents;
+                        for (let obj of objects) {
+                            console.log(obj.Key);
+                            await s3.deleteObject({ Bucket: bucketName, Key: obj.Key }).promise();
+                        }
+                    }
+                    exports.handler = async function(event, context) {
+                        let responseType = response.SUCCESS
+                        if (event.RequestType == 'Delete') {
+                            try {
+                                await listObjects(event.ResourceProperties.BucketName);
+                            } catch (err) {
+                                responseType = response.FAILED
+                            }
+                        }
+                        await response.send(event, context, responseType)
+                    }
+    S3CleanupResource:
+        Type: Custom::cleanupbucket${module_name}
+        Properties:
+            ServiceToken: !GetAtt S3DeleteLambda${module_name}.Arn
+            BucketName: !Ref Bucket${module_name}
+    `;
 }
