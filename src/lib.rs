@@ -14,7 +14,9 @@ mod module_scripting;
 use module_scripting::*;
 
 #[proc_macro_attribute]
-pub fn create_s3(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn create_s3(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let attr = proc_macro2::TokenStream::from(attr);
+    let item = proc_macro2::TokenStream::from(item);
     let mut module = parse_mod_def(item);
     let attr = parse_attributes(attr);
     let s3_conf: S3Bucket = attr.into();
@@ -83,11 +85,13 @@ pub async fn make_s3_client() -> aws_sdk_s3::Client {{
         out.extend([client_func_stream]);
     }
     add_s3_bucket_resource(s3_conf);
-    out
+    out.into()
 }
 
 #[proc_macro_attribute]
-pub fn create_cloudfront_distribution(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn create_cloudfront_distribution(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let attr = proc_macro2::TokenStream::from(attr);
+    let item = proc_macro2::TokenStream::from(item);
     // TODO: handle parsing the module under the item, and add convenience functions
     // to the module
     let attr = parse_attributes(attr);
@@ -95,21 +99,25 @@ pub fn create_cloudfront_distribution(attr: TokenStream, item: TokenStream) -> T
     // TODO: if the conf doesnt have a name/description, set it
     // via the mod name item
     add_cloudfront_resource(conf);
-    item
+    item.into()
 }
 
 #[proc_macro_attribute]
-pub fn create_route53_record(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn create_route53_record(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let attr = proc_macro2::TokenStream::from(attr);
+    let item = proc_macro2::TokenStream::from(item);
     // TODO: handle parsing the module under the item, and add convenience functions
     // to the module
     let attr = parse_attributes(attr);
     let conf: Route53RecordSet = attr.into();
     add_route53_resource(conf);
-    item
+    item.into()
 }
 
 #[proc_macro_attribute]
-pub fn module(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn module(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let attr = proc_macro2::TokenStream::from(attr);
+    let item = proc_macro2::TokenStream::from(item);
     let module_input = match module_scripting::get_module_input(attr) {
         Ok(m) => m,
         Err(e) => panic!("{e}"),
@@ -153,7 +161,9 @@ fn finalize_module(obj: RhaiObject) -> TokenStream {
 }
 
 #[proc_macro_attribute]
-pub fn create_static_website(attr: TokenStream, _item: TokenStream) -> TokenStream {
+pub fn create_static_website(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let attr = proc_macro2::TokenStream::from(attr);
+    let item = proc_macro2::TokenStream::from(item);
     let attr = parse_attributes(attr);
     let conf: StaticWebsite = attr.into();
 
@@ -196,11 +206,13 @@ pub mod my_cdn {{}}
 }})]
 pub mod my_record {{}}")
     .parse().unwrap();
-    out_stream
+    out_stream.into()
 }
 
 #[proc_macro_attribute]
-pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn create_lambda(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let attr = proc_macro2::TokenStream::from(attr);
+    let item = proc_macro2::TokenStream::from(item);
     let attr = parse_attributes(attr);
     let lambda_conf: LambdaFunction = attr.into();
 
@@ -348,12 +360,12 @@ pub fn create_lambda(attr: TokenStream, item: TokenStream) -> TokenStream {
         panic!("No build bucket found. Must provide a bucket name via set_build_bucket!();");
     }
     add_lambda_resource(build_bucket, &func_name, lambda_conf, param_name);
-    out
+    out.into()
 }
 
 /// load a .env file from a specific path
 #[proc_macro]
-pub fn load_dot_env(item: TokenStream) -> TokenStream {
+pub fn load_dot_env(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let mut iter = item.into_iter();
     let path = if let proc_macro::TokenTree::Literal(s) = iter.next().expect("must provide a string literal path to a .env file") {
         s.to_string()
@@ -368,7 +380,7 @@ pub fn load_dot_env(item: TokenStream) -> TokenStream {
 /// if you wish to use a different path to your .env file, make sure to first
 /// call `load_dot_env!("../other/path/.env");`
 #[proc_macro]
-pub fn const_from_dot_env(item: TokenStream) -> TokenStream {
+pub fn const_from_dot_env(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let mut iter = item.into_iter();
     let id = if let proc_macro::TokenTree::Ident(id) = iter.next().expect("must provide an identifier") {
         id
@@ -399,7 +411,7 @@ pub fn const_from_dot_env(item: TokenStream) -> TokenStream {
 /// load a constant from a .env file in your current directory, or use a default
 /// string literal if not found in the .env.
 #[proc_macro]
-pub fn const_from_dot_env_or_default(item: TokenStream) -> TokenStream {
+pub fn const_from_dot_env_or_default(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let mut iter = item.into_iter();
     let id = if let proc_macro::TokenTree::Ident(id) = iter.next().expect("must provide an identifier") {
         id
@@ -449,7 +461,7 @@ pub fn const_from_dot_env_or_default(item: TokenStream) -> TokenStream {
 /// if you wish to use a different path to your .env file, make sure to first
 /// call `load_dot_env!("../other/path/.env");`
 #[proc_macro]
-pub fn const_from(item: TokenStream) -> TokenStream {
+pub fn const_from(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let mut iter = item.into_iter();
     let key = if let proc_macro::TokenTree::Ident(id) = iter.next().expect("must provide an identifier") {
         id.to_string()
@@ -484,7 +496,7 @@ pub fn const_from(item: TokenStream) -> TokenStream {
 /// not save this value as a constant that is available at runtime, but rather
 /// this value is only available at compile time.
 #[proc_macro]
-pub fn secret_from_dot_env(item: TokenStream) -> TokenStream {
+pub fn secret_from_dot_env(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let mut iter = item.into_iter();
     let id = if let proc_macro::TokenTree::Ident(id) = iter.next().expect("must provide an identifier") {
         id
@@ -513,7 +525,7 @@ pub fn secret_from_dot_env(item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro]
-pub fn close(_item: TokenStream) -> TokenStream {
+pub fn close(_item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let var = env::var("RUSTFLAGS").ok();
     // no rustflags means we assume this is the first pass, in
     // this case we wish to output an empty main, and we wish
@@ -529,7 +541,8 @@ pub fn close(_item: TokenStream) -> TokenStream {
 
 /// sets the S3 bucket that will be used to deploy build artifacts (if any)
 #[proc_macro]
-pub fn set_build_bucket(item: TokenStream) -> TokenStream {
+pub fn set_build_bucket(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let item: TokenStream = item.into();
     let mut iter = item.into_iter();
     let next = iter.next().expect("must provide bucket to set_build_bukcet");
     match next {
@@ -555,9 +568,10 @@ pub fn set_build_bucket(item: TokenStream) -> TokenStream {
 
 /// sets the region that this app will be deployed to
 #[proc_macro]
-pub fn set_deploy_region(item: TokenStream) -> TokenStream {
+pub fn set_deploy_region(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let item: TokenStream = item.into();
     let mut iter = item.into_iter();
-    if let proc_macro::TokenTree::Literal(s) = iter.next().expect("must provide bucket to set_build_bukcet") {
+    if let TokenTree::Literal(s) = iter.next().expect("must provide bucket to set_build_bukcet") {
         unsafe {
             DEPLOY_REGION = s.to_string();
         }
@@ -568,9 +582,10 @@ pub fn set_deploy_region(item: TokenStream) -> TokenStream {
 /// sets the stack name for this app. if no stack name provided, the default is to
 /// use the application name
 #[proc_macro]
-pub fn set_stack_name(item: TokenStream) -> TokenStream {
+pub fn set_stack_name(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let item: TokenStream = item.into();
     let mut iter = item.into_iter();
-    if let proc_macro::TokenTree::Literal(s) = iter.next().expect("must provide stack name to set_stack_name") {
+    if let TokenTree::Literal(s) = iter.next().expect("must provide stack name to set_stack_name") {
         unsafe {
             STACK_NAME = s.to_string();
         }

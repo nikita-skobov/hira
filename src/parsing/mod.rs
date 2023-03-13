@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-pub use proc_macro::{TokenTree, TokenStream, Ident, Span, Punct, Delimiter, Group};
+pub use proc_macro2::{Spacing, TokenTree, TokenStream, Ident, Span, Punct, Delimiter, Group};
 
 use super::variables::get_const;
 
@@ -51,7 +51,7 @@ pub fn get_attribute_value(token: TokenTree) -> AttributeValue {
         TokenTree::Group(g) => {
             match g.delimiter() {
                 // this is an object
-                proc_macro::Delimiter::Brace => {
+                Delimiter::Brace => {
                     let mut out = HashMap::new();
                     let mut iter = g.stream().into_iter();
                     let mut name_opt: Option<String> = None;
@@ -63,7 +63,7 @@ pub fn get_attribute_value(token: TokenTree) -> AttributeValue {
                                 // get next token, it should either be a comma, or nonexistent
                                 match iter.next() {
                                     Some(next) => {
-                                        if let proc_macro::TokenTree::Punct(p) = next {
+                                        if let TokenTree::Punct(p) = next {
                                             if p.as_char() != ',' {
                                                 panic!("Expected punctuation ',' after attribute value map. instead found {:?}", p);
                                             }
@@ -96,7 +96,7 @@ pub fn get_attribute_value(token: TokenTree) -> AttributeValue {
                                 }
                                 // after the name we expect a colon
                                 let next = iter.next().expect("Expect punctuation after attribute value key");
-                                if let proc_macro::TokenTree::Punct(p) = next {
+                                if let TokenTree::Punct(p) = next {
                                     if p.as_char() != ':' {
                                         panic!("Expected punctuation ':' after attribute value key {:?}. Instead found {:?}", name_opt.unwrap(), p);
                                     }
@@ -111,7 +111,7 @@ pub fn get_attribute_value(token: TokenTree) -> AttributeValue {
                     return AttributeValue::Map(out);
                 }
                 // this is a list
-                proc_macro::Delimiter::Bracket => {
+                Delimiter::Bracket => {
                     let mut iter = g.stream().into_iter();
                     let mut out = vec![];
                     loop {
@@ -188,7 +188,7 @@ fn expect_ident(s: &str) -> TokenTree {
 }
 
 fn expect_punct(c: char) -> TokenTree {
-    TokenTree::Punct(Punct::new(c, proc_macro::Spacing::Alone))
+    TokenTree::Punct(Punct::new(c, Spacing::Alone))
 }
 
 fn expect_group(d: Delimiter) -> TokenTree {
@@ -296,7 +296,7 @@ impl FuncDef {
         out
     }
     pub fn build_params(&mut self) {
-        let params = if let proc_macro::TokenTree::Group(g) = &self.fn_params {
+        let params = if let TokenTree::Group(g) = &self.fn_params {
             g
         } else {
             panic!("Somehow parameters is not a group?");
@@ -344,7 +344,7 @@ impl FuncDef {
         stream.to_string()
     }
     pub fn change_func_name(&mut self, new_name: &str) {
-        if let proc_macro::TokenTree::Ident(id) = &self.fn_name {
+        if let TokenTree::Ident(id) = &self.fn_name {
             let span = id.span();
             self.fn_name = TokenTree::Ident(Ident::new(new_name, span));
         } else {
@@ -352,7 +352,7 @@ impl FuncDef {
         }
     }
     pub fn get_func_name(&self) -> String {
-        if let proc_macro::TokenTree::Ident(id) = &self.fn_name {
+        if let TokenTree::Ident(id) = &self.fn_name {
             return id.to_string();
         } else {
             panic!("Expected fn_name to be an ident. instead found {:?}", self.fn_name);
@@ -408,7 +408,7 @@ impl ModDef {
         out
     }
     pub fn add_to_body(&mut self, add: TokenStream) {
-        if let proc_macro::TokenTree::Group(g) = &mut self.mod_body {
+        if let TokenTree::Group(g) = &mut self.mod_body {
             let mut old_body = g.stream();
             let span = g.span();
             old_body.extend(add);
@@ -418,7 +418,7 @@ impl ModDef {
         }
     }
     pub fn module_name(&self) -> String {
-        if let proc_macro::TokenTree::Ident(id) = &self.mod_name_ident {
+        if let TokenTree::Ident(id) = &self.mod_name_ident {
             return id.to_string();
         } else {
             panic!("Module missing name");
@@ -431,7 +431,7 @@ impl ModDef {
         }
         let mut match_index = 0;
         let mut expect = &match_tokens[match_index];
-        if let proc_macro::TokenTree::Group(g) = &self.mod_body {
+        if let TokenTree::Group(g) = &self.mod_body {
             for token in g.stream() {
                 if does_match_token(&token, &expect, false).is_ok() {
                     match_index += 1;
@@ -523,14 +523,14 @@ pub fn parse_func_def_safe(token_stream: TokenStream, assert_async: bool) -> Res
             if p.as_char() != '-' { return Err(format!("Error parsing: Expected punctuation '-', instead found {:?}", p)) }
             out.fn_return_punct.push(next);
             next = iter.next().ok_or_else(|| generic_err)?;
-            if let proc_macro::TokenTree::Punct(p) = &next {
+            if let TokenTree::Punct(p) = &next {
                 if p.as_char() != '>' { return Err(format!("Error parsing: Expected punctuation '-', instead found {:?}", p)) }
             }
             out.fn_return_punct.push(next);
             // now we parse the return type.
             loop {
                 next = iter.next().ok_or_else(|| generic_err)?;
-                if let proc_macro::TokenTree::Group(g) = &next {
+                if let TokenTree::Group(g) = &next {
                     // if it's a group with delimiter Brace, that means
                     // it's the function body
                     if g.delimiter() == Delimiter::Brace {

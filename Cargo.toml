@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 rhai = "1.12.0"
+proc-macro2 = "1.0.52"
 
 # TODO: remove comment to be more accurate to how dependencies work w/ hira.
 # this crate has no dependencies, as it's just a proc-macro crate, but these need
