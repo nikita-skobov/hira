@@ -86,6 +86,18 @@ impl RhaiObject {
                 }
             }
         });
+
+        // specific to modules:
+        if let RhaiObject::Mod { .. } = &self {
+            eng.register_fn("add_code_inside", |obj: &mut RhaiObject, s: &str| -> Result<(), String> {
+                if let RhaiObject::Mod { def, .. } = obj {
+                    let stream = TokenStream::from_str(s)
+                        .map_err(|e| format!("Error creating TokenStream in `add_code_inside` from {s}. {e}"))?;
+                    def.add_to_body(stream);
+                }
+                Ok(())
+            });
+        }
     }
 }
 
@@ -292,5 +304,20 @@ mod test {
         let (_, token_stream) = obj.build();
         let s = token_stream.to_string();
         assert_eq!(s, "# [cfg (hello)] mod mymod { } fn generatedfn () { }");
+    }
+
+    #[test]
+    fn can_add_code_inside_modules() {
+        let input = ModuleInput {
+            module_name: "./src/module_scripting/test_fixtures/can_add_code_inside_modules.rhai".into(),
+            module_json: Default::default(),
+        };
+
+        let rust_code = TokenStream::from_str("mod mymod {}").unwrap();
+        let def = parse_mod_def_safe(rust_code).unwrap();
+        let obj = run_module(&input, "mod_macro", RhaiObject::Mod { settings: Default::default(), def }).unwrap();
+        let (_, token_stream) = obj.build();
+        let s = token_stream.to_string();
+        assert_eq!(s, "mod mymod { pub fn generatedfunc () { } }");
     }
 }
