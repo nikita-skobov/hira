@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Debug, str::FromStr};
 
-use proc_macro::{TokenStream, Delimiter};
+use proc_macro2::{TokenStream, Delimiter, TokenTree};
 use rhai::{Engine, AST, Scope, Map, Dynamic};
 
 use crate::resources::{AttributeValue, FuncDef, ModDef};
@@ -20,24 +20,56 @@ impl RhaiObject {
             }
         }
     }
+    pub fn assert_mod(self) -> ModDef {
+        match self {
+            RhaiObject::Func { settings, def } => panic!("Expected module but found func"),
+            RhaiObject::Mod { settings, def } => def,
+        }
+    }
+    pub fn assert_func(self) -> FuncDef {
+        match self {
+            RhaiObject::Func { settings, def } => def,
+            RhaiObject::Mod { settings, def } => panic!("Expected func but found module"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct GlobalSettings {
-    pub add_code_outside: Vec<TokenStream>,
+    pub add_code_after: Vec<TokenStream>,
+    pub add_code_before: Vec<TokenStream>,
 }
 
 impl RhaiObject {
     pub fn build_engine(&self, eng: &mut Engine) {
         // always provide these functions: they are valid regardless of
         // mod, or func defs.
-        eng.register_fn("add_code_outside", |obj: &mut RhaiObject, s: &str| -> Result<(), String> {
+        eng.register_fn("add_code_after", |obj: &mut RhaiObject, s: &str| -> Result<(), String> {
             obj.get_settings(|settings| {
                 let stream = TokenStream::from_str(s)
-                    .map_err(|e| format!("Error creating TokenStream in `add_code_outside` from {s}. {e}"))?;
-                settings.add_code_outside.push(stream);
+                    .map_err(|e| format!("Error creating TokenStream in `add_code_after` from {s}. {e}"))?;
+                settings.add_code_after.push(stream);
                 Ok(())
             })
+        });
+        eng.register_fn("add_code_before", |obj: &mut RhaiObject, s: &str| -> Result<(), String> {
+            obj.get_settings(|settings| {
+                let stream = TokenStream::from_str(s)
+                    .map_err(|e| format!("Error creating TokenStream in `add_code_before` from {s}. {e}"))?;
+                settings.add_code_before.push(stream);
+                Ok(())
+            })
+        });
+        // also should be included for both types, but has different implementations:
+        eng.register_fn("rename", |obj: &mut RhaiObject, s: &str| {
+            match obj {
+                RhaiObject::Mod { def, .. } => {
+                    def.set_module_name(s);
+                }
+                RhaiObject::Func { def, .. } => {
+                    def.set_func_name(s);
+                }
+            }
         });
     }
 }
@@ -132,7 +164,6 @@ pub fn run_module(input: &ModuleInput, fn_name: &str, item: RhaiObject) -> Resul
 
     match eng.call_fn::<RhaiObject>(&mut scope, &ast, fn_name, (item, )) {
         Ok(m) => {
-            println!("{:#?}", m);
             Ok(m)
         }
         Err(e) => {
@@ -149,11 +180,10 @@ pub fn run_module(input: &ModuleInput, fn_name: &str, item: RhaiObject) -> Resul
 pub fn get_module_input(attr: TokenStream) -> Result<ModuleInput, String> {
     // macro invocation must looks like:
     // [my_macro("name-of-module", { "pseudo-json-data": "here" })]
-    println!("{:#?}", attr);
     let generic_err = "Ensure you are invoking this macro in this format: `hira::module(\"macro_name\", {\"data\":\"here\"})`";
     let mut iter = attr.into_iter();
     let next = iter.next().ok_or_else(|| format!("Missing attribute stream. {generic_err}"))?;
-    let mut module_name = if let proc_macro::TokenTree::Literal(s) = next {
+    let mut module_name = if let TokenTree::Literal(s) = next {
         s.to_string()
     } else {
         return Err(format!("First arg to hira::module must be a string literal. Instead found {:?}. {generic_err}", next))
@@ -171,7 +201,7 @@ pub fn get_module_input(attr: TokenStream) -> Result<ModuleInput, String> {
 
     let punct_err = format!("Must have punctuation after first arg to hira::module. {generic_err}");
     let next = iter.next().ok_or_else(|| punct_err.clone())?;
-    if let proc_macro::TokenTree::Punct(p) = next {
+    if let TokenTree::Punct(p) = next {
         if p.as_char() != ',' {
             return Err(punct_err);
         }
@@ -180,7 +210,7 @@ pub fn get_module_input(attr: TokenStream) -> Result<ModuleInput, String> {
     }
     // assert that it must be a group:
     let next = iter.next().ok_or_else(|| format!("Missing second parameter to macro attributes. {generic_err}"))?;
-    let brace_group = if let proc_macro::TokenTree::Group(g) = &next {
+    let brace_group = if let TokenTree::Group(g) = &next {
         if g.delimiter() != Delimiter::Brace {
             return Err(format!("Arg after [hira::module(\"{module_name}\", )] must be in object format '{{}}'. {generic_err}"));
         }
@@ -201,4 +231,30 @@ pub fn get_module_input(attr: TokenStream) -> Result<ModuleInput, String> {
         module_json,
         module_name,
     })
+}
+
+#[cfg(test)]
+mod test {
+    use crate::resources::{parse_func_def_safe, parse_mod_def_safe};
+
+    use super::*;
+
+    #[test]
+    fn can_rename() {
+        let input = ModuleInput {
+            module_name: "./src/module_scripting/test_fixtures/can_rename.rhai".into(),
+            module_json: Default::default(),
+        };
+        let rust_code = TokenStream::from_str("fn myfunc() {}").unwrap();
+        let def = parse_func_def_safe(rust_code, false).unwrap();
+        let obj = run_module(&input, "func_macro", RhaiObject::Func { settings: Default::default(), def }).unwrap();
+        let def = obj.assert_func();
+        assert_eq!(def.get_func_name(), "renamed");
+
+        let rust_code = TokenStream::from_str("mod mymod {}").unwrap();
+        let def = parse_mod_def_safe(rust_code).unwrap();
+        let obj = run_module(&input, "mod_macro", RhaiObject::Mod { settings: Default::default(), def }).unwrap();
+        let def = obj.assert_mod();
+        assert_eq!(def.get_module_name(), "renamed");
+    }
 }

@@ -423,7 +423,7 @@ impl ModDef {
             self.mod_body = TokenTree::Group(new_group);
         }
     }
-    pub fn module_name(&self) -> String {
+    pub fn get_module_name(&self) -> String {
         if let TokenTree::Ident(id) = &self.mod_name_ident {
             return id.to_string();
         } else {
