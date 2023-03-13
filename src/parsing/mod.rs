@@ -349,7 +349,7 @@ impl FuncDef {
         }
         stream.to_string()
     }
-    pub fn change_func_name(&mut self, new_name: &str) {
+    pub fn set_func_name(&mut self, new_name: &str) {
         if let TokenTree::Ident(id) = &self.fn_name {
             let span = id.span();
             self.fn_name = TokenTree::Ident(Ident::new(new_name, span));
@@ -428,6 +428,14 @@ impl ModDef {
             return id.to_string();
         } else {
             panic!("Module missing name");
+        }
+    }
+    pub fn set_module_name(&mut self, name: &str) {
+        if let TokenTree::Ident(id) = &self.mod_name_ident {
+            let ident = Ident::new(name, id.span());
+            self.mod_name_ident = TokenTree::Ident(ident);
+        } else {
+            panic!("Missing module name");
         }
     }
     pub fn contains_tokens(&self, token_stream: TokenStream) -> bool {
