@@ -256,6 +256,9 @@ fn assert_token_safe(actual: &TokenTree, expected: &TokenTree, ignore_value: boo
 #[derive(Debug, Clone)]
 pub struct FuncDef {
     pub fn_async_ident: Option<TokenTree>,
+    pub fn_pub_ident: Option<TokenTree>,
+    pub fn_unsafe_ident: Option<TokenTree>,
+    pub fn_const_ident: Option<TokenTree>,
     pub fn_ident: TokenTree,
     pub fn_name: TokenTree,
     pub fn_params: TokenTree,
@@ -269,6 +272,9 @@ impl Default for FuncDef {
     fn default() -> Self {
         Self {
             fn_async_ident: None,
+            fn_pub_ident: None,
+            fn_unsafe_ident: None,
+            fn_const_ident: None,
             fn_ident: expect_ident("fn"),
             fn_name: expect_ident("fn"),
             fn_params: expect_ident("fn"),
@@ -491,21 +497,30 @@ pub fn parse_func_def_safe(token_stream: TokenStream, assert_async: bool) -> Res
     let mut expect = expect_ident("async");
     let mut iter = token_stream.into_iter();
     let generic_err = "Error parsing: Unexpected end of token stream. This can only be applied to functions. Are you sure you added this macro attribute to a function?";
-    let mut next = iter.next().ok_or_else(|| generic_err)?;
-    // this can either be fn or async
-    let actual_ident = assert_token_safe(&next, &expect, true)?;
-    if actual_ident == "async" {
-        out.fn_async_ident = Some(next);
+    let mut next: TokenTree;
+
+    // loop until we hit the 'fn' identifier
+    loop {
         next = iter.next().ok_or_else(|| generic_err)?;
-        expect = expect_ident("fn");
-        assert_token_safe(&next, &expect, false)?;
-        out.fn_ident = next;
-    } else {
-        out.fn_ident = next;
-    }
-    if assert_async {
-        if out.fn_async_ident.is_none() {
-            return Err(format!("This function must be async"));
+        let actual_ident = assert_token_safe(&next, &expect, true)?;
+        match actual_ident.as_str() {
+            "const" => {
+                out.fn_const_ident = Some(next);
+            },
+            "fn" => {
+                out.fn_ident = next;
+                break;
+            },
+            "async" => {
+                out.fn_async_ident = Some(next);
+            },
+            "pub" => {
+                out.fn_pub_ident = Some(next);
+            },
+            "unsafe" => {
+                out.fn_unsafe_ident = Some(next);
+            },
+            x => return Err(format!("Unexpected identifier while parsing function signature '{x}'")),
         }
     }
     expect = expect_ident("fn"); // we expect next to be the name of the function
@@ -558,5 +573,34 @@ pub fn parse_func_def(token_stream: TokenStream, assert_async: bool) -> FuncDef 
     match parse_func_def_safe(token_stream, assert_async) {
         Ok(o) => o,
         Err(e) => panic!("{e}"),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn can_parse_func_defs() {
+        let fdefs = [
+            // is_async, is_public, is_unsafe, is_const, func def
+            (false,       false,    false,     false,    "fn hello(x: String) -> String { \"a\".into() }"),
+            (false,       true,     false,     false,    "pub fn hello(x: String) -> String { \"a\".into() }"),
+            (true,        false,    false,     false,    "async fn hello(x: String) -> String { \"a\".into() }"),
+            (false,       false,    true,      false,    "unsafe fn hello(x: String) -> String { \"a\".into() }"),
+            (false,       false,    false,     true,     "const fn hello(x: String) -> String { \"a\".into() }"),
+            (false,       true,     true,      true,     "pub const unsafe fn hello(x: String) -> String { \"a\".into() }"),
+            (true,        true,     true,      false,    "pub async unsafe fn hello(x: String) -> String { \"a\".into() }"),
+        ];
+        for (is_async, is_public, is_unsafe, is_const, fdef) in fdefs {
+            let stream: TokenStream = fdef.parse().unwrap();
+            let mut fdef = parse_func_def_safe(stream, false).expect("Failed to parse");
+            assert_eq!(fdef.fn_async_ident.is_some(), is_async);
+            assert_eq!(fdef.fn_pub_ident.is_some(), is_public);
+            assert_eq!(fdef.fn_unsafe_ident.is_some(), is_unsafe);
+            assert_eq!(fdef.fn_const_ident.is_some(), is_const);
+            assert_eq!(fdef.get_return_type(), "String");
+            fdef.assert_num_params(1);
+        }
     }
 }
