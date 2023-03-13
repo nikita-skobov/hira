@@ -1,9 +1,9 @@
 use std::{collections::{HashMap, HashSet}, fmt::Debug, str::FromStr};
 
 use proc_macro2::{TokenStream, Delimiter, TokenTree};
-use rhai::{Engine, AST, Scope, Map, Dynamic};
+use rhai::{Engine, AST, Scope, Map, Dynamic, EvalAltResult};
 
-use crate::resources::{AttributeValue, FuncDef, ModDef, RESOURCES, add_post_cmd, DEPLOY_REGION};
+use crate::resources::{AttributeValue, FuncDef, ModDef, RESOURCES, add_post_cmd, get_deploy_region};
 
 #[derive(Clone, Debug)]
 pub enum RhaiObject {
@@ -37,14 +37,14 @@ impl RhaiObject {
     }
     pub fn assert_mod(self) -> ModDef {
         match self {
-            RhaiObject::Func { settings, def } => panic!("Expected module but found func"),
-            RhaiObject::Mod { settings, def } => def,
+            RhaiObject::Func { .. } => panic!("Expected module but found func"),
+            RhaiObject::Mod { def, .. } => def,
         }
     }
     pub fn assert_func(self) -> FuncDef {
         match self {
-            RhaiObject::Func { settings, def } => def,
-            RhaiObject::Mod { settings, def } => panic!("Expected func but found module"),
+            RhaiObject::Func { def, .. } => def,
+            RhaiObject::Mod { .. } => panic!("Expected func but found module"),
         }
     }
 }
@@ -114,16 +114,42 @@ impl RhaiObject {
                 }
             }
         });
+        eng.register_fn("get_name", |obj: &mut RhaiObject| -> String {
+            match obj {
+                RhaiObject::Mod { def, .. } => {
+                    def.get_module_name()
+                }
+                RhaiObject::Func { def, .. } => {
+                    def.get_func_name()
+                }
+            }
+        });
 
         // specific to modules:
         if let RhaiObject::Mod { .. } = &self {
-            eng.register_fn("add_code_inside", |obj: &mut RhaiObject, s: &str| -> Result<(), String> {
+            eng.register_fn("add_code_inside", |obj: &mut RhaiObject, s: &str| -> Result<(), Box<EvalAltResult>> {
                 if let RhaiObject::Mod { def, .. } = obj {
-                    let stream = TokenStream::from_str(s)
-                        .map_err(|e| format!("Error creating TokenStream in `add_code_inside` from {s}. {e}"))?;
+                    let stream = match TokenStream::from_str(s) {
+                        Ok(o) => o,
+                        Err(e) => {
+                            return Err(format!("Error creating TokenStream in `add_code_inside` from {s}. {e}").into());
+                        }
+                    };
                     def.add_to_body(stream);
                 }
                 Ok(())
+            });
+            eng.register_fn("contains_tokens", |obj: &mut RhaiObject, s: &str| -> Result<bool, Box<EvalAltResult>> {
+                if let RhaiObject::Mod { def, .. } = obj {
+                    let stream = match TokenStream::from_str(s) {
+                        Ok(o) => o,
+                        Err(e) => {
+                            return Err(format!("Error creating TokenStream in `contains_tokens` from {s}. {e}").into());
+                        }
+                    };
+                    return Ok(def.contains_tokens(stream));
+                }
+                Ok(false)
             });
         }
     }
@@ -195,18 +221,8 @@ pub fn create_module_scope(input: &ModuleInput) -> Scope {
     out.push("HIRA_MOD_NAME", input.module_name.clone());
     let rhai_map = attribute_map_to_rhai_map(&input.module_json);
     out.push("HIRA_MOD_INPUT", rhai_map);
-    unsafe {
-        let mut region = format!("{}", &DEPLOY_REGION);
-        loop {
-            if region.starts_with('"') && region.ends_with('"') {
-                region.remove(0);
-                region.pop();
-            } else {
-                break;
-            }
-        }
-        out.push("HIRA_DEPLOY_REGION", region.clone());
-    }
+    let region = get_deploy_region();
+    out.push("HIRA_DEPLOY_REGION", region.clone());
     out
 }
 

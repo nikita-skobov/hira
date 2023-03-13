@@ -16,7 +16,7 @@ mod static_website;
 pub use static_website::*;
 
 pub static mut BUILD_BUCKET: String = String::new();
-pub static mut DEPLOY_REGION: String = String::new();
+pub static mut DEPLOY_REGION: Result<String, &'static str> = Err("us-east-1");
 pub static mut STACK_NAME: String = String::new();
 pub static mut BUILD_COMMANDS: Vec<String> = vec![];
 pub static mut PACKAGE_COMMANDS: Vec<String> = vec![];
@@ -24,6 +24,21 @@ pub static mut DEPLOY_COMMANDS: Vec<String> = vec![];
 pub static mut POST_COMMANDS: Vec<String> = vec![];
 pub static mut RESOURCES: Vec<String> = vec![];
 pub static mut PARAMETER_VALUES: Vec<(String, String)> = vec![];
+
+pub fn get_deploy_region() -> String {
+    unsafe {
+        match &DEPLOY_REGION {
+            Ok(s) => s.clone(),
+            Err(e) => (*e).into(),
+        }
+    }
+}
+
+pub fn set_deploy_region<S: AsRef<str>>(region: S) {
+    unsafe {
+        DEPLOY_REGION = Ok(region.as_ref().into());
+    }
+}
 
 pub fn add_build_cmd<S: AsRef<str>>(cmd: S) {
     unsafe {

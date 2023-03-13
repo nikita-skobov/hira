@@ -28,7 +28,7 @@ pub fn create_s3(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -
             should_output_client = true;
         }
     }
-    let region = unsafe { &DEPLOY_REGION };
+    let region = get_deploy_region();
     let bucket_name = &s3_conf.name;
 
     let client_func_str = format!("
@@ -64,7 +64,7 @@ pub async fn make_s3_client() -> aws_sdk_s3::Client {{
         self::put_object_inner(&client, key, data).await
     }}").parse().unwrap());
 
-    let module_name = module.module_name();
+    let module_name = module.get_module_name();
     let main_str = format!("
     #[cfg({module_name})]
     #[tokio::main]
@@ -148,36 +148,25 @@ pub fn module(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> p
     panic!("hira::module can only be used on functions or rust modules. Parsing errors:\nError parsing as func: {err_as_func}\nError parsing as mod: {err_as_mod}");
 }
 
-fn finalize_module(obj: RhaiObject) -> TokenStream {
-    let (settings, mut out_stream) = match obj {
-        RhaiObject::Mod { settings, def } => (settings, def.build()),
-        RhaiObject::Func { settings, def } => (settings, def.build()),
-    };
-
-    for outside_stream in settings.add_code_outside {
-        out_stream.extend(outside_stream);
-    }
-    out_stream
+fn finalize_module(obj: RhaiObject) -> proc_macro::TokenStream {
+    let (_settings, out_stream) = obj.build();
+    out_stream.into()
 }
 
 #[proc_macro_attribute]
 pub fn create_static_website(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let attr = proc_macro2::TokenStream::from(attr);
-    let item = proc_macro2::TokenStream::from(item);
+    let _item = proc_macro2::TokenStream::from(item);
     let attr = parse_attributes(attr);
     let conf: StaticWebsite = attr.into();
 
     let mut bucket_name = format!("hiragen{}", conf.url);
     bucket_name = bucket_name.replace(".", "").replace("-", "").replace("_", "");
 
-    let mut region = unsafe { DEPLOY_REGION.clone() };
+    let region = get_deploy_region();
     let url = &conf.url;
     let arn = &conf.acm_arn;
     let cdn_resource_name = format!("CDN{bucket_name}");
-    if region.starts_with('"') && region.ends_with('"') {
-        region.remove(0);
-        region.pop();
-    }
     let bucket_domain = format!("{bucket_name}.s3-website-{region}.amazonaws.com");
 
     let out_stream: TokenStream = format!("
@@ -248,7 +237,7 @@ pub fn create_lambda(attr: proc_macro::TokenStream, item: proc_macro::TokenStrea
         ""
     };
     let renamed_func = format!("actual_{func_name}");
-    func_def.change_func_name(&renamed_func);
+    func_def.set_func_name(&renamed_func);
     let (_, use_type) = func_def.get_nth_param(0);
     let (use_ret, use_body) = if ret_type.starts_with("Result") {
         (ret_type.clone(), format!("let (x, _context) = event.into_parts(); {renamed_func}(x){use_async}"))
@@ -261,7 +250,7 @@ pub fn create_lambda(attr: proc_macro::TokenStream, item: proc_macro::TokenStrea
         }
     };
 
-    let region = unsafe {&DEPLOY_REGION};
+    let region = get_deploy_region();
     let client_func_str = &format!("
         // TODO: save the client somehow. dont re-create for each request...
         pub async fn make_lambda_client() -> aws_sdk_lambda::Client {{
@@ -572,9 +561,16 @@ pub fn set_deploy_region(item: proc_macro::TokenStream) -> proc_macro::TokenStre
     let item: TokenStream = item.into();
     let mut iter = item.into_iter();
     if let TokenTree::Literal(s) = iter.next().expect("must provide bucket to set_build_bukcet") {
-        unsafe {
-            DEPLOY_REGION = s.to_string();
+        let mut s = s.to_string();
+        loop {
+            if s.starts_with('"') && s.ends_with('"') {
+                s.remove(0);
+                s.pop();
+            } else {
+                break;
+            }
         }
+        resources::set_deploy_region(s);
     }
     "".parse().unwrap()
 }
@@ -613,19 +609,22 @@ unsafe fn output_deployment_file() {
         file.write_all("\n".as_bytes()).expect("failed to write");
     }
     file.write_all("\n# deploy:\n".as_bytes()).expect("failed to write");
-    let region = unsafe {&DEPLOY_REGION};
+    let region = get_deploy_region();
     let mut stack_name = unsafe {STACK_NAME.clone()};
     if stack_name.is_empty() {
         stack_name = env::var("CARGO_BIN_NAME").expect("No stack name provided, and failed to use cargo bin name as stack name");
     }
-    let mut cmd = format!("AWS_REGION={region} aws --region {region} cloudformation deploy --stack-name {stack_name} --template-file ./hira/deploy.yml --capabilities CAPABILITY_NAMED_IAM");
-    if !PARAMETER_VALUES.is_empty() {
-        cmd.push_str(" --parameter-overrides ");
-        for (key, value) in &PARAMETER_VALUES {
-            cmd.push_str(&format!("{key}={value} "));
+    stack_name = stack_name.replace("_", "-");
+    if !RESOURCES.is_empty() {
+        let mut cmd = format!("AWS_REGION=\"{region}\" aws --region {region} cloudformation deploy --stack-name {stack_name} --template-file ./hira/deploy.yml --capabilities CAPABILITY_NAMED_IAM");
+        if !PARAMETER_VALUES.is_empty() {
+            cmd.push_str(" --parameter-overrides ");
+            for (key, value) in &PARAMETER_VALUES {
+                cmd.push_str(&format!("{key}={value} "));
+            }
         }
+        file.write_all(cmd.as_bytes()).expect("Failed to write");
     }
-    file.write_all(cmd.as_bytes()).expect("Failed to write");
     for step in DEPLOY_COMMANDS.iter() {
         file.write_all(step.as_bytes()).expect("failed to write");
         file.write_all("\n".as_bytes()).expect("failed to write");
