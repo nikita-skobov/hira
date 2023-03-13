@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, str::FromStr};
+use std::{collections::{HashMap, HashSet}, fmt::Debug, str::FromStr};
 
 use proc_macro2::{TokenStream, Delimiter, TokenTree};
 use rhai::{Engine, AST, Scope, Map, Dynamic};
@@ -55,12 +55,29 @@ pub struct GlobalSettings {
     pub add_code_before: Vec<TokenStream>,
 }
 
+pub static mut CODE_ADDED_AFTER: Option<HashSet<String>> = None;
+
 impl RhaiObject {
     pub fn build_engine(&self, eng: &mut Engine) {
         // always provide these functions: they are valid regardless of
         // mod, or func defs.
         eng.register_fn("add_code_after", |obj: &mut RhaiObject, s: &str| -> Result<(), String> {
             obj.get_settings(|settings| {
+                // important: ensure no functions added after are the same otherwise the build
+                // will break. this is convenient for the module writes so that they
+                // can always output the code they want, and we prevent them from
+                // creating duplicates by accident.
+                unsafe {
+                    if CODE_ADDED_AFTER.is_none() {
+                        CODE_ADDED_AFTER = Some(HashSet::new());
+                    }
+                    if let Some(code_set) = &mut CODE_ADDED_AFTER {
+                        if code_set.contains(s) {
+                            return Ok(());
+                        }
+                        code_set.insert(s.into());
+                    }
+                }
                 let stream = TokenStream::from_str(s)
                     .map_err(|e| format!("Error creating TokenStream in `add_code_after` from {s}. {e}"))?;
                 settings.add_code_after.push(stream);
@@ -296,14 +313,36 @@ mod test {
         let obj = run_module(&input, "func_macro", RhaiObject::Func { settings: Default::default(), def }).unwrap();
         let (_, token_stream) = obj.build();
         let s = token_stream.to_string();
-        assert_eq!(s, "# [cfg (hello)] fn myfunc () { } fn generatedfn () { }");
+        assert_eq!(s, "# [cfg (hello)] fn myfunc () { } fn generatedfn1 () { }");
 
         let rust_code = TokenStream::from_str("mod mymod {}").unwrap();
         let def = parse_mod_def_safe(rust_code).unwrap();
         let obj = run_module(&input, "mod_macro", RhaiObject::Mod { settings: Default::default(), def }).unwrap();
         let (_, token_stream) = obj.build();
         let s = token_stream.to_string();
-        assert_eq!(s, "# [cfg (hello)] mod mymod { } fn generatedfn () { }");
+        assert_eq!(s, "# [cfg (hello)] mod mymod { } fn generatedfn2 () { }");
+    }
+
+    #[test]
+    fn can_add_code_after_multiple_times_without_breaking() {
+        let input = ModuleInput {
+            module_name: "./src/module_scripting/test_fixtures/can_add_code_after_multiple_times_without_breaking.rhai".into(),
+            module_json: Default::default(),
+        };
+        let rust_code = TokenStream::from_str("fn myfunc() {}").unwrap();
+        let def = parse_func_def_safe(rust_code, false).unwrap();
+        let obj = run_module(&input, "func_macro", RhaiObject::Func { settings: Default::default(), def }).unwrap();
+        let (_, token_stream) = obj.build();
+        let s = token_stream.to_string();
+        assert_eq!(s, "fn myfunc () { } fn generatedfn () { }");
+
+        let rust_code = TokenStream::from_str("mod mymod {}").unwrap();
+        let def = parse_mod_def_safe(rust_code).unwrap();
+        let obj = run_module(&input, "mod_macro", RhaiObject::Mod { settings: Default::default(), def }).unwrap();
+        let (_, token_stream) = obj.build();
+        let s = token_stream.to_string();
+        // we already added generatedfn(), so it shouldnt appear again here.
+        assert_eq!(s, "mod mymod { }");
     }
 
     #[test]
