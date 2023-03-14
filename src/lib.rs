@@ -34,7 +34,7 @@ pub fn create_s3(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -
     let client_func_str = format!("
 // TODO: save the client somehow. dont re-create for each request...
 pub async fn make_s3_client() -> aws_sdk_s3::Client {{
-    let region_provider = aws_config::meta::region::RegionProviderChain::default_provider().or_else({region});
+    let region_provider = aws_config::meta::region::RegionProviderChain::default_provider().or_else(\"{region}\");
     let sdk_config = aws_config::from_env().region(region_provider).load().await;
     aws_sdk_s3::Client::new(&sdk_config)
 }}"
