@@ -3,12 +3,13 @@ use std::{collections::{HashMap, HashSet}, fmt::Debug, str::FromStr};
 use proc_macro2::{TokenStream, Delimiter, TokenTree};
 use rhai::{Engine, AST, Scope, Map, Dynamic, EvalAltResult};
 
-use crate::{resources::{AttributeValue, FuncDef, ModDef, RESOURCES, add_post_cmd, get_deploy_region}, variables};
+use crate::{resources::{AttributeValue, FuncDef, ModDef, RESOURCES, add_post_cmd, get_deploy_region, MatchDef}, variables};
 
 #[derive(Clone, Debug)]
 pub enum RhaiObject {
     Mod { settings: GlobalSettings, def: ModDef },
     Func { settings: GlobalSettings, def: FuncDef },
+    Match { settings: GlobalSettings, def: MatchDef },
 }
 
 impl RhaiObject {
@@ -16,6 +17,7 @@ impl RhaiObject {
         let (settings, stream) = match self {
             RhaiObject::Mod { settings, def } => (settings, def.build()),
             RhaiObject::Func { settings, def } => (settings, def.build()),
+            RhaiObject::Match { settings, def } => (settings, def.build()),
         };
         let mut out_stream = TokenStream::new();
         for before in &settings.add_code_before {
@@ -30,6 +32,7 @@ impl RhaiObject {
     pub fn get_settings<T, F: FnMut(&mut GlobalSettings) -> T>(&mut self, mut cb: F) -> T {
         match self {
             RhaiObject::Mod { settings, .. } |
+            RhaiObject::Match { settings, .. } |
             RhaiObject::Func { settings, .. } => {
                 cb(settings)
             }
@@ -37,14 +40,14 @@ impl RhaiObject {
     }
     pub fn assert_mod(self) -> ModDef {
         match self {
-            RhaiObject::Func { .. } => panic!("Expected module but found func"),
             RhaiObject::Mod { def, .. } => def,
+            x => panic!("Expected module but found {:?}", x),
         }
     }
     pub fn assert_func(self) -> FuncDef {
         match self {
             RhaiObject::Func { def, .. } => def,
-            RhaiObject::Mod { .. } => panic!("Expected func but found module"),
+            x => panic!("Expected func but found {:?}", x),
         }
     }
 }
@@ -112,6 +115,9 @@ impl RhaiObject {
                 RhaiObject::Func { def, .. } => {
                     def.set_func_name(s);
                 }
+                RhaiObject::Match { def, .. } => {
+                    def.set_name(s);
+                }
             }
         });
         eng.register_fn("set_global_const", |obj: &mut RhaiObject, key: &str, val: &str| {
@@ -121,6 +127,9 @@ impl RhaiObject {
                 }
                 RhaiObject::Func { def, .. } => {
                     def.get_func_name()
+                }
+                RhaiObject::Match { def, .. } => {
+                    def.get_name()
                 }
             };
             let module_key = format!("{mod_name}::{key}");
@@ -133,6 +142,9 @@ impl RhaiObject {
                 }
                 RhaiObject::Func { def, .. } => {
                     def.get_func_name()
+                }
+                RhaiObject::Match { def, .. } => {
+                    def.get_name()
                 }
             }
         });
@@ -162,6 +174,25 @@ impl RhaiObject {
                     return Ok(def.contains_tokens(stream));
                 }
                 Ok(false)
+            });
+        }
+        // specific to match statements:
+        if let RhaiObject::Match { .. } = &self {
+            eng.register_fn("get_match_content", |obj: &mut RhaiObject| -> Map {
+                let mut map = Map::new();
+                if let RhaiObject::Match { def, .. } = obj {
+                    let match_against = def.match_against.clone();
+                    let mut out = vec![];
+                    for (match_part, result_part) in &def.match_statements {
+                        let mut inner_obj = Map::new();
+                        inner_obj.insert("match".into(), match_part.clone().into());
+                        inner_obj.insert("result".into(), result_part.clone().into());
+                        out.push(inner_obj);
+                    }
+                    map.insert("match_body".into(), out.into());
+                    map.insert("match_against".into(), match_against.into());
+                }
+                map
             });
         }
     }

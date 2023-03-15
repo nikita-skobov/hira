@@ -145,7 +145,18 @@ pub fn module(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> p
         }
         Err(e) => e,
     };
-    panic!("hira::module can only be used on functions or rust modules. Parsing errors:\nError parsing as func: {err_as_func}\nError parsing as mod: {err_as_mod}");
+    let err_as_match = match parse_match_def_safe(item.clone()) {
+        Ok(match_def) => {
+            match run_module(&module_input, "match_macro", RhaiObject::Match{ def: match_def, settings: Default::default() }) {
+                Err(e) => panic!("{e}"),
+                Ok(o) => {
+                    return finalize_module(o);
+                }
+            }
+        }
+        Err(e) => e,
+    };
+    panic!("hira::module can only be used on functions, match statements, or rust modules. Parsing errors:\nError parsing as func: {err_as_func}\nError parsing as mod: {err_as_mod}\nError parsing as match: {err_as_match}");
 }
 
 fn finalize_module(obj: RhaiObject) -> proc_macro::TokenStream {

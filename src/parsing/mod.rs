@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 pub use proc_macro2::{Spacing, TokenTree, TokenStream, Ident, Span, Punct, Delimiter, Group};
 
@@ -254,6 +254,213 @@ fn assert_token_safe(actual: &TokenTree, expected: &TokenTree, ignore_value: boo
 }
 
 #[derive(Debug, Clone)]
+pub struct MatchDef {
+    pub pub_ident: Option<TokenTree>,
+    pub const_ident: TokenTree,
+    pub statement_name: String, // eg: const xyz: _ = match {}. the statement_name is "xyz"
+    pub statement_name_ident: TokenTree,
+    pub punct_ident: TokenTree,
+    pub type_ident: TokenTree,
+    pub equals_ident: TokenTree,
+    pub match_ident: TokenTree,
+    pub match_parens_ident: TokenTree,
+    pub match_body: TokenTree,
+    pub semicolon_ident: Option<TokenTree>,
+
+    pub match_against: Vec<String>,
+    pub match_statements: Vec<(Vec<String>, Vec<String>)>,
+}
+
+impl MatchDef {
+    pub fn build(self) -> TokenStream {
+        let mut out = TokenStream::new();
+        if let Some(pub_ident) = self.pub_ident {
+            out.extend([pub_ident]);
+        }
+        out.extend([self.const_ident]);
+        out.extend([self.statement_name_ident]);
+        out.extend([self.punct_ident]);
+        out.extend([self.type_ident]);
+        out.extend([self.equals_ident]);
+        out.extend([self.match_ident]);
+        out.extend([self.match_parens_ident]);
+        // TODO: is there a better way to handle this?
+        // while we wish to give the macro writer flexibility in their match body,
+        // most match body values wont be valid, so we enforce that
+        // after the macro module runs, we simply replace the body with
+        // _ => ()
+        // which will always be valid.
+        out.extend(TokenStream::from_str("{ _ => () }").unwrap());
+        // out.extend([self.match_body]);
+        if let Some(semicolon) = self.semicolon_ident {
+            out.extend([semicolon]);
+        } else {
+            // it always has to end w/ a semi-colon so we'll help the user out :P
+            let punct = expect_punct(';');
+            out.extend([punct]);
+        }
+        out
+    }
+
+    pub fn get_name(&self) -> String {
+        self.statement_name.clone()
+    }
+
+    pub fn set_name(&mut self, s: &str) {
+        self.statement_name = s.into();
+        if let TokenTree::Ident(id) = &mut self.statement_name_ident {
+            let span = id.span();
+            let mut new_id = Ident::new(s, span);
+            self.statement_name_ident = TokenTree::Ident(new_id);
+        }
+    }
+
+    pub fn get_string_tuple_group(s: TokenStream) -> Result<Vec<String>, String> {
+        let mut out = vec![];
+        let mut expect_punct = false;
+        let mut last_ident_str: Option<String> = None;
+        for token in s {
+            match token {
+                TokenTree::Punct(p) => {
+                    let p_char = p.as_char();
+                    if let Some(last_ident) = &mut last_ident_str {
+                        if p_char == ':' {
+                            last_ident.push(p_char);
+                        } else {
+                            // otherwise, we end the last_ident string and output it:
+                            match get_const(&last_ident) {
+                                Some(s) => {
+                                    out.push(s);
+                                }
+                                None => {
+                                    return Err(format!("Failed to resolve value for {:?}", last_ident));
+                                }
+                            }
+                            last_ident_str = None;
+                        }
+                        continue;
+                    }
+                    if expect_punct {
+                        expect_punct = false;
+                        continue;
+                    }
+                }
+                TokenTree::Literal(s) => {
+                    let mut s = s.to_string();
+                    loop {
+                        if s.starts_with('"') && s.ends_with('"') {
+                            s.remove(0);
+                            s.pop();
+                        } else {
+                            break
+                        }
+                    }
+                    out.push(s);
+                    expect_punct = true;
+                }
+                TokenTree::Ident(id) => {
+                    if let Some(last_ident) = &mut last_ident_str {
+                        last_ident.push_str(&id.to_string());
+                    } else {
+                        last_ident_str = Some(id.to_string());
+                    }
+                }
+                x => return Err(format!("Match statements can only contain string literal values to match against. {:?} is invalid", x))
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn fill_match_statements(&mut self) -> Result<(), String> {
+        let group = if let TokenTree::Group(g) = &self.match_body {
+            g
+        } else {
+            return Err(format!("Match does not contain a match body group?"));
+        };
+        let mut out = vec![];
+        let mut parens1: Option<Vec<String>> = None;
+        let mut expect_equals = false;
+        let mut expect_arrow = false;
+        for token in group.stream() {
+            match token {
+                TokenTree::Group(g) => {
+                    if g.delimiter() != Delimiter::Parenthesis {
+                        return Err(format!("Match body can only contain () groups {:?} is invalid", g));
+                    }
+                    match parens1.take() {
+                        // we have first group, so get the 2nd group and output it.
+                        Some(first_part) => {
+                            let a = Self::get_string_tuple_group(g.stream())?;
+                            out.push((first_part, a));
+                        }
+                        None => {
+                            // we dont have the first group yet, so get it:
+                            let a = Self::get_string_tuple_group(g.stream())?;
+                            parens1 = Some(a);
+                            expect_equals = true;
+                        }
+                    }
+                }
+                TokenTree::Punct(p) => {
+                    let p_char = p.as_char();
+                    if p_char == ',' {
+                        continue;
+                    }
+                    if expect_equals && p_char == '=' {
+                        expect_equals = false;
+                        expect_arrow = true;
+                        continue;
+                    } else if expect_arrow && p_char == '>' {
+                        expect_arrow = false;
+                        expect_equals = false;
+                        continue;
+                    }
+                    return Err(format!("Unexpected punctuation while parsing match body: {:?}", p));
+                }
+                x => {
+                    return Err(format!("Match body can only contain parentheses groups and punctuation. {:?} is invalid.", x));
+                }
+            }
+        }
+        self.match_statements = out;
+
+        Ok(())
+    }
+
+    pub fn fill_match_against(&mut self) -> Result<(), String> {
+        let group = if let TokenTree::Group(g) = &self.match_parens_ident {
+            g
+        } else {
+            return Err(format!("Match does not contain a parentheses group?"));
+        };
+        let out = Self::get_string_tuple_group(group.stream())?;
+        self.match_against = out;
+        Ok(())
+    }
+}
+
+impl Default for MatchDef {
+    fn default() -> Self {
+        Self {
+            pub_ident: None,
+            const_ident: expect_ident("fn"),
+            statement_name: Default::default(),
+            statement_name_ident: expect_ident("fn"),
+            punct_ident: expect_ident("fn"),
+            type_ident: expect_ident("fn"),
+            equals_ident: expect_ident("fn"),
+            match_ident: expect_ident("fn"),
+            match_parens_ident: expect_ident("fn"),
+            match_body: expect_ident("fn"),
+            semicolon_ident: None,
+
+            match_against: vec![],
+            match_statements: vec![],
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct FuncDef {
     pub fn_async_ident: Option<TokenTree>,
     pub fn_pub_ident: Option<TokenTree>,
@@ -293,6 +500,7 @@ impl FuncDef {
         if let Some(async_ident) = self.fn_async_ident {
             out.extend([async_ident]);
         }
+        // TODO: account for the optional qualifiers
         out.extend([self.fn_ident]);
         out.extend([self.fn_name]);
         out.extend([self.fn_params]);
@@ -497,6 +705,63 @@ pub fn parse_mod_def_safe(token_stream: TokenStream) -> Result<ModDef, String> {
     next = iter.next().ok_or_else(|| generic_err)?;
     assert_token_safe(&next, &expect, false)?;
     out.mod_body = next;
+    Ok(out)
+}
+
+pub fn parse_match_def_safe(token_stream: TokenStream) -> Result<MatchDef, String> {
+    let mut out = MatchDef::default();
+    let mut expect = expect_ident("const");
+    let mut iter = token_stream.into_iter();
+    let generic_err = "Error parsing: Unexpected end of token stream. This can only be applied to match blocks. Are you sure you added this macro attribute to a match block?";
+    // first keyword must be const or pub
+    let mut next = iter.next().ok_or_else(|| generic_err)?;
+    let ident_val = assert_token_safe(&next, &expect, true)?;
+    if ident_val == "pub" {
+        out.pub_ident = Some(next);
+        // next one must be const then.
+        next = iter.next().ok_or_else(|| generic_err)?;
+        assert_token_safe(&next, &expect, false)?;
+        out.const_ident = next;
+    } else {
+        out.const_ident = next;
+    }
+    // second is an ident of their 'module' name. can be any valid ident.
+    next = iter.next().ok_or_else(|| generic_err)?;
+    out.statement_name = assert_token_safe(&next, &expect, true)?;
+    out.statement_name_ident = next;
+    // must be a : punct
+    expect = expect_punct(':');
+    next = iter.next().ok_or_else(|| generic_err)?;
+    assert_token_safe(&next, &expect, false)?;
+    out.punct_ident = next;
+    // must be the () type.
+    expect = expect_group(Delimiter::Parenthesis);
+    next = iter.next().ok_or_else(|| generic_err)?;
+    assert_token_safe(&next, &expect, true)?;
+    out.type_ident = next;
+    // must be a = punct
+    expect = expect_punct('=');
+    next = iter.next().ok_or_else(|| generic_err)?;
+    assert_token_safe(&next, &expect, false)?;
+    out.equals_ident = next;
+    // must be a match ident
+    expect = expect_ident("match");
+    next = iter.next().ok_or_else(|| generic_err)?;
+    assert_token_safe(&next, &expect, false)?;
+    out.match_ident = next;
+    // must be a group
+    expect = expect_group(Delimiter::Parenthesis);
+    next = iter.next().ok_or_else(|| generic_err)?;
+    assert_token_safe(&next, &expect, false)?;
+    out.match_parens_ident = next;
+    // must be a group
+    expect = expect_group(Delimiter::Brace);
+    next = iter.next().ok_or_else(|| generic_err)?;
+    assert_token_safe(&next, &expect, false)?;
+    out.match_body = next;
+    out.fill_match_against()?;
+    out.fill_match_statements()?;
+
     Ok(out)
 }
 
