@@ -189,7 +189,8 @@ pub fn resolve_module(module_name: &str) -> Result<(Engine, AST), String> {
         }
     };
 
-    let engine = Engine::new();
+    let mut engine = Engine::new();
+    engine.set_max_expr_depths(0, 0);
     let ast = match engine.compile(script) {
         Ok(a) => a,
         Err(e) => {
