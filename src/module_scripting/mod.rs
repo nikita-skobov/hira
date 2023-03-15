@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}, fmt::Debug, str::FromStr};
 use proc_macro2::{TokenStream, Delimiter, TokenTree};
 use rhai::{Engine, AST, Scope, Map, Dynamic, EvalAltResult};
 
-use crate::resources::{AttributeValue, FuncDef, ModDef, RESOURCES, add_post_cmd, get_deploy_region};
+use crate::{resources::{AttributeValue, FuncDef, ModDef, RESOURCES, add_post_cmd, get_deploy_region}, variables};
 
 #[derive(Clone, Debug)]
 pub enum RhaiObject {
@@ -113,6 +113,18 @@ impl RhaiObject {
                     def.set_func_name(s);
                 }
             }
+        });
+        eng.register_fn("set_global_const", |obj: &mut RhaiObject, key: &str, val: &str| {
+            let mod_name = match obj {
+                RhaiObject::Mod { def, .. } => {
+                    def.get_module_name()
+                }
+                RhaiObject::Func { def, .. } => {
+                    def.get_func_name()
+                }
+            };
+            let module_key = format!("{mod_name}::{key}");
+            variables::set_const(&module_key, val)
         });
         eng.register_fn("get_name", |obj: &mut RhaiObject| -> String {
             match obj {

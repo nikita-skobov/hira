@@ -65,17 +65,18 @@ fn mod_macro(x) {
         Properties:
             AccessControl: ${access_control}
             BucketName: ${bucket_name}
-${website(HIRA_MOD_INPUT, module_name)}
+${website(x, HIRA_MOD_INPUT, bucket_name, HIRA_DEPLOY_REGION, module_name)}
 ${custom_cleanup_resources(HIRA_MOD_INPUT, module_name)}
     `);
 
     x
 }
 
-fn website(mod_input, module_name) {
+fn website(x, mod_input, bucket_name, region, module_name) {
     if !("public_website" in mod_input) {
         return "";
     }
+    x.set_global_const("WEBSITE_URL", `${bucket_name}.s3-website-${region}.amazonaws.com`);
     let index_document = "index.html";
     let error_document = "error.html";
     if "index_document" in mod_input.public_website {

@@ -365,6 +365,49 @@ pub fn load_dot_env(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     "".parse().unwrap()
 }
 
+/// set a constant value that can be referenced by other macros
+#[proc_macro]
+pub fn set_const(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let mut iter = item.into_iter();
+    let key = if let proc_macro::TokenTree::Literal(s) = iter.next().expect("must provide a string literal") {
+        let mut s = s.to_string();
+        loop {
+            if s.starts_with('"') && s.ends_with('"') {
+                s.remove(0);
+                s.pop();
+            } else {
+                break
+            }
+        }
+        s
+    } else {
+        panic!("set_const only accepts a string literal");
+    };
+    if let proc_macro::TokenTree::Punct(p) = iter.next().expect("unexpected end of token stream") {
+        if p.as_char() != ',' {
+            panic!("unexpected punctuation in set_const. expected ',' between strings")
+        }
+    } else {
+        panic!("unexpected value in set_const. expected ',' between strings.");
+    };
+    let value = if let proc_macro::TokenTree::Literal(s) = iter.next().expect("must provide a string literal") {
+        let mut s = s.to_string();
+        loop {
+            if s.starts_with('"') && s.ends_with('"') {
+                s.remove(0);
+                s.pop();
+            } else {
+                break
+            }
+        }
+        s
+    } else {
+        panic!("set_const only accepts a string literal");
+    };
+    variables::set_const(&key, &value);
+    "".parse().unwrap()
+}
+
 /// load a constant from a .env file in your current directory.
 /// if you wish to use a different path to your .env file, make sure to first
 /// call `load_dot_env!("../other/path/.env");`
@@ -393,7 +436,7 @@ pub fn const_from_dot_env(item: proc_macro::TokenStream) -> proc_macro::TokenStr
         }
     }
 
-    set_const(&key, &value);
+    variables::set_const(&key, &value);
     format!("pub const {key}: &'static str = \"{value}\";").parse().unwrap()
 }
 
@@ -441,7 +484,7 @@ pub fn const_from_dot_env_or_default(item: proc_macro::TokenStream) -> proc_macr
         }
     }
 
-    set_const(&key, &value);
+    variables::set_const(&key, &value);
     format!("pub const {key}: &'static str = \"{value}\";").parse().unwrap()
 }
 
@@ -473,7 +516,7 @@ pub fn const_from(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     } else {
         panic!("Expected string literal. Instead found {:?}", val);
     };
-    set_const(&key, &value);
+    variables::set_const(&key, &value);
     format!("pub const {key}: &'static str = \"{value}\";").parse().unwrap()
 }
 
@@ -509,7 +552,7 @@ pub fn secret_from_dot_env(item: proc_macro::TokenStream) -> proc_macro::TokenSt
         }
     }
 
-    set_const(&key, &value);
+    variables::set_const(&key, &value);
     "".parse().unwrap()
 }
 
