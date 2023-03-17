@@ -598,11 +598,11 @@ impl FuncDef {
         }
     }
     pub fn get_return_type(&self) -> String {
-        let mut stream = TokenStream::new();
+        let mut out: String = "".into();
         for token in &self.fn_return {
-            stream.extend([token.clone()]);
+            out.push_str(&token.to_string());
         }
-        stream.to_string()
+        out
     }
     pub fn set_func_name(&mut self, new_name: &str) {
         if let TokenTree::Ident(id) = &self.fn_name {
