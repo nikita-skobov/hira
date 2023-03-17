@@ -148,7 +148,33 @@ impl RhaiObject {
                 }
             }
         });
-
+        // specific to functions:
+        if let RhaiObject::Func { .. } = &self {
+            eng.register_fn("is_const", |obj: &mut RhaiObject| -> bool {
+                match &obj {
+                    RhaiObject::Func { def, .. } => def.fn_const_ident.is_some(),
+                    _ => false,
+                }
+            });
+            eng.register_fn("is_async", |obj: &mut RhaiObject| -> bool {
+                match &obj {
+                    RhaiObject::Func { def, .. } => def.fn_async_ident.is_some(),
+                    _ => false,
+                }
+            });
+            eng.register_fn("is_unsafe", |obj: &mut RhaiObject| -> bool {
+                match &obj {
+                    RhaiObject::Func { def, .. } => def.fn_unsafe_ident.is_some(),
+                    _ => false,
+                }
+            });
+            eng.register_fn("is_pub", |obj: &mut RhaiObject| -> bool {
+                match &obj {
+                    RhaiObject::Func { def, .. } => def.fn_pub_ident.is_some(),
+                    _ => false,
+                }
+            });
+        }
         // specific to modules:
         if let RhaiObject::Mod { .. } = &self {
             eng.register_fn("add_code_inside", |obj: &mut RhaiObject, s: &str| -> Result<(), Box<EvalAltResult>> {
