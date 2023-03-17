@@ -497,10 +497,24 @@ impl Default for FuncDef {
 impl FuncDef {
     pub fn build(self) -> TokenStream {
         let mut out = TokenStream::new();
-        if let Some(async_ident) = self.fn_async_ident {
-            out.extend([async_ident]);
+        if let Some(pub_ident) = self.fn_pub_ident {
+            out.extend([pub_ident]);
         }
-        // TODO: account for the optional qualifiers
+        match (self.fn_async_ident, self.fn_const_ident) {
+            (None, None) => {},
+            (None, Some(const_ident)) => {
+                out.extend([const_ident]);
+            }
+            (Some(async_ident), None) => {
+                out.extend([async_ident]);
+            }
+            (Some(_), Some(_)) => {
+                panic!("Function {} is marked as both const and async", self.fn_name.to_string());
+            }
+        }
+        if let Some(unsafe_ident) = self.fn_unsafe_ident {
+            out.extend([unsafe_ident]);
+        }
         out.extend([self.fn_ident]);
         out.extend([self.fn_name]);
         out.extend([self.fn_params]);
