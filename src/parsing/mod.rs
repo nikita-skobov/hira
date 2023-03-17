@@ -554,14 +554,47 @@ impl FuncDef {
             // colon
             let expect = expect_punct(':');
             assert_token(&token, &expect, false);
-            let token = match iter.next() {
-                Some(t) => t,
-                None => { break }
-            };
-            // type of the param
-            let expect = expect_ident("fn");
-            let val = assert_token(&token, &expect, true);
-            self.params.push((name, val));
+            // type of the param:
+            // for complex types like Result<Result<A, B>, C>
+            // we have to keep parsing until we reach the end of the type
+            // or we reach the end of the params (eg: `fn(a: A)` )
+            let mut expect_brackets = 0;
+            let mut out_type: String = "".into();
+            loop {
+                let token = match iter.next() {
+                    Some(t) => t,
+                    None => { break }
+                };
+                match token {
+                    TokenTree::Group(g) => {
+                        out_type.push_str(&g.to_string());
+                    }
+                    TokenTree::Ident(id) => {
+                        out_type.push_str(&id.to_string());
+                    }
+                    TokenTree::Punct(p) => {
+                        let p_char = p.as_char();
+                        if p_char == ',' && expect_brackets == 0 {
+                            break;
+                        }
+                        out_type.push(p_char);
+                        if p_char == '<' {
+                            expect_brackets += 1;
+                            continue;
+                        }
+                        if p_char == '>' {
+                            expect_brackets -= 1;
+                            if expect_brackets == 0 {
+                                break;
+                            }
+                        }
+                    }
+                    TokenTree::Literal(x) => {
+                        panic!("Unexpected literal {:?} while parsing function params", x);
+                    }
+                }
+            }
+            self.params.push((name, out_type));
         }
     }
     pub fn get_return_type(&self) -> String {
