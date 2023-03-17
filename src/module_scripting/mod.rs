@@ -1,7 +1,7 @@
 use std::{collections::{HashMap, HashSet}, fmt::Debug, str::FromStr};
 
 use proc_macro2::{TokenStream, Delimiter, TokenTree};
-use rhai::{Engine, AST, Scope, Map, Dynamic, EvalAltResult};
+use rhai::{Engine, AST, Scope, Map, Dynamic, EvalAltResult, Array};
 
 use crate::{resources::{AttributeValue, FuncDef, ModDef, RESOURCES, add_post_cmd, get_deploy_region, MatchDef}, variables};
 
@@ -172,6 +172,30 @@ impl RhaiObject {
                 match &obj {
                     RhaiObject::Func { def, .. } => def.fn_pub_ident.is_some(),
                     _ => false,
+                }
+            });
+            eng.register_fn("get_return_type", |obj: &mut RhaiObject| -> String {
+                match &obj {
+                    RhaiObject::Func { def, .. } => def.get_return_type(),
+                    _ => "".into(),
+                }
+            });
+            eng.register_fn("get_parameters", |obj: &mut RhaiObject| -> Array {
+                match obj {
+                    RhaiObject::Func { def, .. } => {
+                        if def.params.is_empty() {
+                            def.build_params();
+                        }
+                        let mut out = vec![];
+                        for (param_name, param_type) in &def.params {
+                            let mut map = Map::new();
+                            map.insert("param_name".into(), param_name.into());
+                            map.insert("param_type".into(), param_type.into());
+                            out.push(Dynamic::from_map(map));
+                        }
+                        Array::from(out)
+                    },
+                    _ => Array::from(vec![])
                 }
             });
         }
