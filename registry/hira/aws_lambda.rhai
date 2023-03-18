@@ -16,6 +16,7 @@ fn func_macro(x) {
     let service_func_name = `lambda_service_func_${func_name}`;
     x.rename(renamed_func);
     let service_func_def = `
+    #[allow(dead_code)]
     async fn ${service_func_name}(event: lambda_runtime::LambdaEvent<${param_type}>) -> ${return_type} {
         let (x, _context) = event.into_parts();
         ${renamed_func}(x).await
@@ -31,9 +32,10 @@ fn func_macro(x) {
     // we add this to verify if the user's parameters are valid and work
     // in a lambda context. otherwise, we'd get an error during deploy, but not during build.
     let debug_type_check_def = `
+    #[allow(dead_code)]
     #[cfg(debug_assertions)]
-    fn _hira_generated_type_check_func_${func_name}() {
-        lambda_runtime::run(lambda_runtime::service_fn(${service_func_name}));
+    async fn _hira_generated_type_check_func_${func_name}() {
+        let _ = lambda_runtime::run(lambda_runtime::service_fn(${service_func_name})).await;
     }
     `;
     x.add_code_after(service_func_def);
