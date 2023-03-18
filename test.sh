@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 
-./testing/target/release/testing
+./testing/target/release/testing "$@"
