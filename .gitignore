@@ -11,3 +11,5 @@ examples/*/target/
 examples/*/cross-target/
 examples/*/hira/
 .env
+testing/snapshots/
+testing/target/
