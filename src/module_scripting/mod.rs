@@ -3,7 +3,7 @@ use std::{collections::{HashMap, HashSet}, fmt::Debug, str::FromStr};
 use proc_macro2::{TokenStream, Delimiter, TokenTree};
 use rhai::{Engine, AST, Scope, Map, Dynamic, EvalAltResult, Array};
 
-use crate::{resources::{AttributeValue, FuncDef, ModDef, RESOURCES, add_post_cmd, get_deploy_region, MatchDef}, variables};
+use crate::{resources::{AttributeValue, FuncDef, ModDef, RESOURCES, add_post_cmd, get_deploy_region, MatchDef, add_build_cmd, add_param_value, BUILD_BUCKET}, variables};
 
 #[derive(Clone, Debug)]
 pub enum RhaiObject {
@@ -74,6 +74,25 @@ impl RhaiObject {
             // TODO: theres ways to make this safer. for eg: only allow some types of
             // commands such as cargo build and cargo run. and enforce it being separated by a cfg()...
             add_post_cmd(s);
+        });
+        eng.register_fn("add_build_command", |s: &str| {
+            add_build_cmd(s);
+        });
+        eng.register_fn("add_param_value", |pkey: &str, pval: &str| {
+            add_param_value((pkey, pval));
+        });
+        eng.register_fn("get_build_bucket", || -> String {
+            let build_bucket = unsafe {&BUILD_BUCKET};
+            build_bucket.clone()
+        });
+        eng.register_fn("get_bin_name", || -> String {
+            let mut bin_name = "".to_string();
+            for (key, value) in std::env::vars() {
+                if key == "CARGO_BIN_NAME" || key == "CARGO_CRATE_NAME" {
+                    bin_name = value;
+                }
+            }
+            bin_name
         });
         eng.register_fn("add_code_after", |obj: &mut RhaiObject, s: &str| -> Result<(), String> {
             obj.get_settings(|settings| {
