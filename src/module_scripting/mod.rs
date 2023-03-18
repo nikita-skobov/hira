@@ -288,7 +288,8 @@ pub fn resolve_module(module_name: &str) -> Result<(Engine, AST), String> {
             .call().map_err(|e| e.to_string())?
             .into_json().map_err(|e| e.to_string())?;
         if body.encoding == "base64" {
-            let decoded = general_purpose::STANDARD_NO_PAD.decode(body.content).map_err(|e| e.to_string())?;
+            let body = body.content.replace("\n","");
+            let decoded = general_purpose::STANDARD.decode(body).map_err(|e| e.to_string())?;
             String::from_utf8_lossy(&decoded).to_string()
         } else {
             body.content
