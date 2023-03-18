@@ -11,34 +11,34 @@ Homoiconic Rust Aws
 Hira is a set of rust procedural macros that can manipulate rust code at compile time to create deployment infrastructure for AWS. A single rust binary project can be used to create an entire AWS application. This can be best explained via an example. Consider the following code:
 
 ```rs
-use hira::{close, create_lambda, set_build_bucket, set_deploy_region, set_stack_name};
+use hira::{close, set_build_bucket, set_deploy_region, set_stack_name};
 use serde_json::Value;
 
-set_build_bucket!("put-the-name-of-your-s3-bucket-here");
+hira::const_from_dot_env!(BUILD_BUCKET);
+set_build_bucket!(BUILD_BUCKET);
 set_deploy_region!("us-east-1");
-set_stack_name!("hello-world-stack4");
+set_stack_name!("example-hello-world");
 
-#[create_lambda({
-    triggers: [{ "type": function_url }],
+#[hira::module("hira:aws_lambda", {
+    triggers: [{ "type": "function_url" }],
     policy_statements: [{
         "action": "lambda:InvokeFunction",
         "resource": "arn:aws:lambda:*:*:function:apples"
     }],
 })]
-async fn hello_world(event: Value) -> String {
+async fn hello_world(event: Value) -> Result<String> {
     println!("{:#?}", event);
     // this invokes the 'apples' lambda function
-    let apples_str = apples(2).await;
-    format!("You have {apples_str}")
+    let apples_str = apples(2usize).await?;
+    Ok(format!("You have {apples_str}"))
 }
 
-#[create_lambda]
-async fn apples(n: usize) -> String {
-    format!("{n} apples")
+#[hira::module("hira:aws_lambda", {})]
+async fn apples(n: usize) -> Result<String> {
+    Ok(format!("{n} apples"))
 }
 
 close!();
-
 
 ```
 
