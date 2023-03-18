@@ -1,4 +1,4 @@
-use hira::{close, create_lambda, set_build_bucket, set_deploy_region, set_stack_name, secret_from_dot_env, const_from_dot_env_or_default, load_dot_env};
+use hira::{close, set_build_bucket, set_deploy_region, set_stack_name, secret_from_dot_env, const_from_dot_env_or_default, load_dot_env};
 use serde_json::Value;
 
 // this is optional. by default we assume your environment
@@ -18,21 +18,17 @@ set_deploy_region!("us-east-1");
 set_stack_name!(SECRET_STACK_NAME);
 
 
-#[create_lambda({
+#[hira::module("hira:aws_lambda", {
     triggers: [{ "type": "function_url" }],
-    policy_statements: [{
-        "action": "lambda:InvokeFunction",
-        "resource": "arn:aws:lambda:*:*:function:apples"
-    }],
 })]
-async fn hello_world(_event: Value) -> String {
+async fn hello_world(_event: Value) -> Result<String> {
     // this is valid because BUILD_BUCKET is a publically accessible constant
     println!("{}", BUILD_BUCKET);
     // This is NOT valid because we declared SECRET_STACK_NAME a secret,
     // and therefore it does not exist at runtime:
     // println!("{}", SECRET_STACK_NAME);
 
-    format!("hello world")
+    Ok(format!("hello world"))
 }
 
 close!();
