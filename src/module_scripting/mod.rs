@@ -283,16 +283,50 @@ pub struct GitHubResponse {
 /// given a module name, find the module script and load it.
 pub fn resolve_module(module_name: &str) -> Result<(Engine, AST), String> {
     let script = if let Some((module_namespace, module_name)) = module_name.split_once(":") {
-        let url = format!("https://api.github.com/repos/nikita-skobov/hira/contents/registry/{module_namespace}/{module_name}.rhai");
-        let body: GitHubResponse = ureq::get(&url)
-            .call().map_err(|e| e.to_string())?
-            .into_json().map_err(|e| e.to_string())?;
-        if body.encoding == "base64" {
-            let body = body.content.replace("\n","");
-            let decoded = general_purpose::STANDARD.decode(body).map_err(|e| e.to_string())?;
-            String::from_utf8_lossy(&decoded).to_string()
+        // first, check if the module was previously downloaded
+        let path = format!("./hira/modules/{module_namespace}/{module_name}.rhai");
+        let should_download = match std::fs::metadata(&path) {
+            Ok(_) => false,
+            Err(_) => true,
+        };
+        if should_download {
+            let url = format!("https://api.github.com/repos/nikita-skobov/hira/contents/registry/{module_namespace}/{module_name}.rhai");
+            let body: GitHubResponse = match ureq::get(&url).call() {
+                Ok(resp) => match resp.into_json() {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return Err(format!("Unsuccessful response to fetch module {}:{} from github\n{:#?}", module_namespace, module_name, e));
+                    }
+                },
+                Err(e) => {
+                    return Err(format!("Failed to request module {}:{} from github\n{:#?}", module_namespace, module_name, e));
+                }
+            };
+            let script = if body.encoding == "base64" {
+                let body = body.content.replace("\n","");
+                let decoded = general_purpose::STANDARD.decode(body).map_err(|e| e.to_string())?;
+                String::from_utf8_lossy(&decoded).to_string()
+            } else {
+                body.content
+            };
+            // save it to disk:
+            let module_dir = &format!("./hira/modules/{module_namespace}");
+            if let Err(e) = std::fs::create_dir_all(&module_dir) {
+                // just warn, but keep trying...
+                eprintln!("Error creating module directory {module_dir}\n{e}");
+            }
+            if let Err(e) = std::fs::write(path, script.as_bytes()) {
+                eprintln!("Error saving module {module_namespace}:{module_name} to hira/modules\n{e}");
+            }
+            script
         } else {
-            body.content
+            // we already have it, so just read it:
+            match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    return Err(format!("Failed to load module '{module_name}' from file system. {e}"));
+                }
+            }
         }
     } else {
         // if it's not a namespaced module, then it should be a path to the module script.
