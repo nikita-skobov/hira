@@ -72,11 +72,7 @@ fn match_macro(x) {
         let default_origin_policy = "https-only";
         if default_route.origin.len() > 2 {
             let extra_params = default_route.origin[2];
-            print("EXTRA PARAMS");
-            print(extra_params);
             for key in extra_params.split(",") {
-                print("KEY");
-                print(key);
                 if key.contains("originProtocol") {
                     default_origin_policy = "http-only";
                 }
