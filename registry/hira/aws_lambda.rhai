@@ -5,8 +5,15 @@ fn func_macro(x) {
     let func_name = x.get_name();
     let return_type = x.get_return_type();
     if !(return_type.starts_with("Result<")) {
-        throw `Return type for lambda must be a Result<_, _>. '${return_type}' is invalid`;
+        throw `Return type for lambda must be a Result<_>. '${return_type}' is invalid`;
     }
+    if return_type.contains(",") {
+        throw `Return type for lambda must only contain one generic component. This module hijacks this Result from: Result<A> to Result<A, runtime_error>. Ensure you are only providing 1 value to the Result`;
+    }
+    return_type.replace("Result<", "");
+    return_type.replace(">", "");
+    x.set_return_type(`Result<${return_type}, lambda_runtime::Error>`);
+    return_type = x.get_return_type();
     let params = x.get_parameters();
     if params.len() != 1 {
         throw `Lambda must only take 1 parameter`;
@@ -15,6 +22,14 @@ fn func_macro(x) {
     let renamed_func = `actual_func_${func_name}`;
     let service_func_name = `lambda_service_func_${func_name}`;
     x.rename(renamed_func);
+    let make_client_func_def = `
+    // TODO: save the client somehow. dont re-create for each request...
+    pub async fn make_lambda_client() -> aws_sdk_lambda::Client {
+        let region = "${HIRA_DEPLOY_REGION}";
+        let region_provider = aws_config::meta::region::RegionProviderChain::default_provider().or_else(region);
+        let sdk_config = aws_config::from_env().region(region_provider).load().await;
+        aws_sdk_lambda::Client::new(&sdk_config)
+    }`;
     let service_func_def = `
     #[allow(dead_code)]
     async fn ${service_func_name}(event: lambda_runtime::LambdaEvent<${param_type}>) -> ${return_type} {
@@ -38,9 +53,41 @@ fn func_macro(x) {
         let _ = lambda_runtime::run(lambda_runtime::service_fn(${service_func_name})).await;
     }
     `;
+    let invoke_func_def = `
+    async fn ${func_name}(n: impl Into<${param_type}>) -> ${return_type} {
+        let n_param = n.into();
+        let payload = match serde_json::to_string(&n_param) {
+            Ok(p) => p,
+            Err(e) => return Err(e.into()),
+        };
+        let c = make_lambda_client().await;
+        let res = c.invoke().function_name("${func_name}")
+            .payload(aws_sdk_lambda::types::Blob::new(payload))
+            .send().await;
+        match res {
+            Ok(out) => {
+                if let Some(payload) = out.payload() {
+                    let payload = payload.as_ref();
+                    match serde_json::from_slice(&payload) {
+                        Ok(s) => Ok(s),
+                        Err(e) => {
+                            Err(e.into())
+                        }
+                    }
+                } else {
+                    Err(lambda_runtime::Error::from("Empty response from lambda").into())
+                }
+            }
+            Err(err) => {
+                Err(err.into())
+            }
+        }
+    }`;
     x.add_code_after(service_func_def);
     x.add_code_after(main_func_def);
     x.add_code_after(debug_type_check_def);
+    x.add_code_after(make_client_func_def);
+    x.add_code_after(invoke_func_def);
 
     let bin_name = get_bin_name();
     if bin_name.is_empty() {
