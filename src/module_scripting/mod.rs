@@ -2,6 +2,8 @@ use std::{collections::{HashMap, HashSet}, fmt::Debug, str::FromStr};
 
 use proc_macro2::{TokenStream, Delimiter, TokenTree};
 use rhai::{Engine, AST, Scope, Map, Dynamic, EvalAltResult, Array};
+use serde::{Serialize, Deserialize};
+use base64::{Engine as _, engine::general_purpose};
 
 use crate::{resources::{AttributeValue, FuncDef, ModDef, RESOURCES, add_post_cmd, get_deploy_region, MatchDef, add_build_cmd, add_param_value, BUILD_BUCKET}, variables};
 
@@ -272,20 +274,32 @@ pub struct ModuleInput {
     pub module_json: HashMap<String, AttributeValue>,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct GitHubResponse {
+    pub content: String,
+    pub encoding: String,
+}
+
 /// given a module name, find the module script and load it.
 pub fn resolve_module(module_name: &str) -> Result<(Engine, AST), String> {
-    if let Some((_module_namespace, _module_name)) = module_name.split_once(":") {
-        // TODO: handle some kind of module system via an id, rather than a file path.
-        // in the future maybe people can register modules somehow.
-        // but for now we will just say its unimplemented, and only allow modules via file paths.
-        todo!()
-    }
-
-    // if it's not a namespaced module, then it should be a path to the module script.
-    let script = match std::fs::read_to_string(module_name) {
-        Ok(s) => s,
-        Err(e) => {
-            return Err(format!("Failed to load module '{module_name}' from file system. {e}"));
+    let script = if let Some((module_namespace, module_name)) = module_name.split_once(":") {
+        let url = format!("https://api.github.com/repos/nikita-skobov/hira/contents/registry/{module_namespace}/{module_name}.rhai");
+        let body: GitHubResponse = ureq::get(&url)
+            .call().map_err(|e| e.to_string())?
+            .into_json().map_err(|e| e.to_string())?;
+        if body.encoding == "base64" {
+            let decoded = general_purpose::STANDARD_NO_PAD.decode(body.content).map_err(|e| e.to_string())?;
+            String::from_utf8_lossy(&decoded).to_string()
+        } else {
+            body.content
+        }
+    } else {
+        // if it's not a namespaced module, then it should be a path to the module script.
+        match std::fs::read_to_string(module_name) {
+            Ok(s) => s,
+            Err(e) => {
+                return Err(format!("Failed to load module '{module_name}' from file system. {e}"));
+            }
         }
     };
 
