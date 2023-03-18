@@ -607,6 +607,12 @@ impl FuncDef {
         }
         out
     }
+    pub fn set_return_type(&mut self, s: &str) {
+        self.fn_return = vec![];
+        for token in TokenStream::from_str(s).expect("Failed to save return type. Invalid format") {
+            self.fn_return.push(token);
+        }
+    }
     pub fn set_func_name(&mut self, new_name: &str) {
         if let TokenTree::Ident(id) = &self.fn_name {
             let span = id.span();

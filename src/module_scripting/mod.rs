@@ -201,6 +201,14 @@ impl RhaiObject {
                     _ => "".into(),
                 }
             });
+            eng.register_fn("set_return_type", |obj: &mut RhaiObject, s: &str| {
+                match obj {
+                    RhaiObject::Func { def, .. } => {
+                        def.set_return_type(s);
+                    }
+                    _ => {},
+                }
+            });
             eng.register_fn("get_parameters", |obj: &mut RhaiObject| -> Array {
                 match obj {
                     RhaiObject::Func { def, .. } => {
