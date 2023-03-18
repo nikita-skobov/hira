@@ -1,4 +1,4 @@
-use hira::{close, create_lambda, set_build_bucket, set_deploy_region, set_stack_name, create_s3, const_from_dot_env_or_default};
+use hira::{close, set_build_bucket, set_deploy_region, set_stack_name, const_from_dot_env_or_default};
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use std::{time::{SystemTime, UNIX_EPOCH}, collections::HashMap};
@@ -17,17 +17,17 @@ pub struct Response {
     pub body: String,
 }
 
-#[create_s3({ name: "mybuckadsdsadsadsa321321" })]
+#[hira::module("hira:aws_s3", { name: "hira-example-simple-s3-lambda-api-bucket" })]
 pub mod mybucket {}
 
-#[create_lambda({
+#[hira::module("hira:aws_lambda", {
     triggers: [{ "type": "function_url" }],
     policy_statements: [{
         "action": "s3:PutObject",
-        "resource": "arn:aws:s3:::mybuckadsdsadsadsa321321/*"
+        "resource": "arn:aws:s3:::hira-example-simple-s3-lambda-api-bucket/*"
     }],
 })]
-async fn mybucket_uploader(event: Value) -> Response {
+async fn mybucket_uploader(event: Value) -> Result<Response> {
     let mut resp = Response {
         status_code: 202,
         headers: HashMap::new(),
@@ -40,7 +40,7 @@ async fn mybucket_uploader(event: Value) -> Response {
         resp.status_code = 500;
         resp.body = format!("Error putting object: {e}");
     }
-    resp
+    Ok(resp)
 }
 
 close!();
