@@ -84,3 +84,6 @@ cargo build
 - [ ] Example: lambda can create an ec2 by calling its function.
 - [X] Environment variable + const tracking
 - [X] Move all artifacts to use /hira folder
+- [ ] Allow making a module that wraps another module, and your module gets counted as 1. useful because: then you can enforce each module gets separate sub-stack
+- [ ] Snapshot testing against example stacks.
+- [ ] Store your state deployment model. you deploy state that you can compare against in custom functions.
