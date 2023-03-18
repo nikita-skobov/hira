@@ -473,6 +473,8 @@ pub struct FuncDef {
     pub fn_return: Vec<TokenTree>,
     pub fn_body: TokenTree,
     pub params: Vec<(String, String)>,
+    // this is fixed no matter that the script renames the function to.
+    pub name: String,
 }
 
 impl Default for FuncDef {
@@ -489,6 +491,7 @@ impl Default for FuncDef {
             fn_return: vec![],
             fn_body: expect_ident("fn"),
 
+            name: "".into(),
             params: vec![],
         }
     }
@@ -613,11 +616,7 @@ impl FuncDef {
         }
     }
     pub fn get_func_name(&self) -> String {
-        if let TokenTree::Ident(id) = &self.fn_name {
-            return id.to_string();
-        } else {
-            panic!("Expected fn_name to be an ident. instead found {:?}", self.fn_name);
-        }
+        self.name.clone()
     }
     pub fn assert_num_params(&mut self, num: usize) {
         if self.params.is_empty() {
@@ -885,6 +884,12 @@ pub fn parse_func_def_safe(token_stream: TokenStream, assert_async: bool) -> Res
             return Err(format!("Error parsing: Expected return type for function. Instead found {:?}", next));
         }
     }
+
+    out.name = if let TokenTree::Ident(id) = &out.fn_name {
+        id.to_string()
+    } else {
+        panic!("Expected fn_name to be an ident. instead found {:?}", out.fn_name);
+    };
 
     Ok(out)
 }
