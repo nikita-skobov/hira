@@ -1,9 +1,10 @@
 use hira::{close, create_lambda, set_build_bucket, set_deploy_region, set_stack_name};
 use serde_json::Value;
 
-set_build_bucket!("put-the-name-of-your-s3-bucket-here");
+hira::const_from_dot_env!(BUILD_BUCKET);
+set_build_bucket!(BUILD_BUCKET);
 set_deploy_region!("us-east-1");
-set_stack_name!("hello-world-stack4");
+set_stack_name!("example-hello-world");
 
 #[create_lambda({
     triggers: [{ "type": "function_url" }],
