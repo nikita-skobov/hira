@@ -721,6 +721,46 @@ impl ModDef {
         }
         false
     }
+    pub fn get_encapsulated_value(&self, s: &str) -> Result<String, String> {
+        let (before, after) = if let Some((before, after)) = s.split_once("*") {
+            (before, after)
+        } else {
+            return Err(format!("can only get encapsulated values that contain an asterisk*. {s} is not a valid search string"));
+        };
+        let mut before_tokens = vec![];
+        let mut after_tokens = vec![];
+        for token in TokenStream::from_str(before).map_err(|e| e.to_string())? {
+            before_tokens.push(token);
+        }
+        for token in TokenStream::from_str(after).map_err(|e| e.to_string())? {
+            after_tokens.push(token);
+        }
+        let mut match_index = 0;
+        let mut collect = false;
+        let mut out: String = "".into();
+        if let TokenTree::Group(g) = &self.mod_body {
+            for token in g.stream() {
+                if collect {
+                    if does_match_token(&token, &after_tokens[0], false).is_err() {
+                        out.push_str(&token.to_string());
+                    } else {
+                        break;
+                    }
+                    continue;
+                }
+                let expect = &before_tokens[match_index];
+                if does_match_token(&token, &expect, false).is_ok() {
+                    match_index += 1;
+                    if match_index >= before_tokens.len() {
+                        collect = true;
+                    }
+                } else {
+                    match_index = 0;
+                }
+            }
+        }
+        Ok(out)
+    }
 }
 
 pub fn parse_mod_def(token_stream: TokenStream) -> ModDef {
@@ -933,5 +973,22 @@ mod test {
             assert_eq!(fdef.get_return_type(), "String");
             fdef.assert_num_params(1);
         }
+    }
+
+    #[test]
+    fn mod_defs_can_get_encapsulated_values() {
+        let moddef = "mod mymod { type Thing = HashMap<X, Y>; }";
+        let stream: TokenStream = moddef.parse().unwrap();
+        let mdef = parse_mod_def_safe(stream).unwrap();
+        let val = mdef.get_encapsulated_value("HashMap<*>").unwrap();
+        assert_eq!(val, "X,Y");
+        let val = mdef.get_encapsulated_value("HashMap<*,").unwrap();
+        assert_eq!(val, "X");
+        // TODO: this one is harder...
+        // let moddef = "mod mymod { type Thing = HashMap<Result<A, B>, C>; }";
+        // let stream: TokenStream = moddef.parse().unwrap();
+        // let mdef = parse_mod_def_safe(stream).unwrap();
+        // let val = mdef.get_value_encapsulated_by("HashMap<*,C>").unwrap();
+        // assert_eq!(val, "Result<A,B>");
     }
 }

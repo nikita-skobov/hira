@@ -254,6 +254,17 @@ impl RhaiObject {
                 }
                 Ok(false)
             });
+            eng.register_fn("get_encapsulated_value", |obj: &mut RhaiObject, s: &str| -> Result<String, Box<EvalAltResult>> {
+                if let RhaiObject::Mod { def, .. } = obj {
+                    match def.get_encapsulated_value(s) {
+                        Ok(v) => return Ok(v),
+                        Err(e) => {
+                            return Err(format!("Error getting encapsulated value of {s}\n{e}").into());
+                        }
+                    }
+                }
+                Err("get_encapsulated_value is only valid for mod defs.".into())
+            });
         }
         // specific to match statements:
         if let RhaiObject::Match { .. } = &self {
