@@ -56,25 +56,59 @@ pub fn get_attribute_value(token: TokenTree) -> AttributeValue {
                     let mut iter = g.stream().into_iter();
                     let mut name_opt: Option<String> = None;
                     loop {
-                        if let Some(next) = iter.next() {
+                        if let Some(mut next) = iter.next() {
                             if let Some(name) = name_opt.take() {
-                                let val = get_attribute_value(next);
-                                out.insert(name, val);
-                                // get next token, it should either be a comma, or nonexistent
-                                match iter.next() {
-                                    Some(next) => {
-                                        if let TokenTree::Punct(p) = next {
-                                            if p.as_char() != ',' {
-                                                panic!("Expected punctuation ',' after attribute value map. instead found {:?}", p);
+                                // if its an identifier, it might have more identifiers after it
+                                // forming a key we can search through constants for.
+                                // iterate until we reach a non ':' or a non identifier.
+                                if let TokenTree::Ident(id) = &next {
+                                    let mut out_id = id.to_string();
+                                    let mut break_out = false;
+                                    loop {
+                                        next = match iter.next() {
+                                            Some(n) => n,
+                                            None => {
+                                                break_out = true;
+                                                break;
+                                            },
+                                        };
+                                        match &next {
+                                            TokenTree::Ident(id) => {
+                                                out_id.push_str(&id.to_string());
                                             }
-                                        } else {
-                                            panic!("Expected punctuation ',' after attribute value map. instead found {:?}", next);
+                                            TokenTree::Punct(p) => {
+                                                if p.as_char() == ',' {
+                                                    break;
+                                                }
+                                                out_id.push(p.as_char());
+                                            }
+                                            _ => break,
                                         }
                                     }
-                                    // end of the object, break
-                                    None => {
+                                    // now we collected the full string, try to look it up:
+                                    if let Some(val) = get_const(&out_id) {
+                                        out.insert(name, AttributeValue::Str(val));
+                                    } else {
+                                        panic!("Failed to find value for '{out_id}'. Make sure you load it as a proper const using const_from_dot_env!(). Or if this value is meant to be used as is, surround it in double quotes like as \"{out_id}\"");
+                                    }
+                                    if break_out {
                                         break;
                                     }
+                                } else {
+                                    let val = get_attribute_value(next);
+                                    out.insert(name, val);
+                                    next = match iter.next() {
+                                        Some(n) => n,
+                                        None => break,
+                                    };
+                                }
+                                // get next token, it should either be a comma, or nonexistent
+                                if let TokenTree::Punct(p) = next {
+                                    if p.as_char() != ',' {
+                                        panic!("Expected punctuation ',' after attribute value map. instead found {:?}", p);
+                                    }
+                                } else {
+                                    panic!("Expected punctuation ',' after attribute value map. instead found {:?}", next);
                                 }
                             } else {
                                 // no name yet, we expect an identifier, or a literal
