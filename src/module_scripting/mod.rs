@@ -85,6 +85,9 @@ impl RhaiObject {
         });
         eng.register_fn("get_build_bucket", || -> String {
             let build_bucket = unsafe {&BUILD_BUCKET};
+            if build_bucket.is_empty() {
+                panic!("Must provide a build_bucket via hira::set_build_bucket!(\"bucketname-here\");");
+            }
             build_bucket.clone()
         });
         eng.register_fn("get_bin_name", || -> String {
