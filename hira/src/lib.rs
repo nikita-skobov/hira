@@ -849,6 +849,17 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
     #[output_and_stringify_basic(library_obj_extra_impl)]
     impl LibraryObj {
         #[allow(dead_code)]
+        pub fn new() -> Self {
+            Self {
+                compiler_error_message: Default::default(),
+                add_code_after: Default::default(),
+                crate_name: Default::default(),
+                user_data: UserData::new(),
+                shared_output_data: Default::default(),
+                shared_state: Default::default(),
+            }
+        }
+        #[allow(dead_code)]
         fn compile_error(&mut self, err_msg: &str) {
             self.compiler_error_message = err_msg.into();
         }
@@ -904,6 +915,10 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
     }
     #[output_and_stringify_basic(user_data_extra_impl)]
     impl UserData {
+        #[allow(dead_code)]
+        fn new() -> Self {
+            UserData::Missing
+        }
         /// Get the name of the user's data that they put this macro over.
         /// for example `struct MyStruct { ... }` returns "MyStruct"
         /// 
@@ -1092,7 +1107,7 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
     // it groups it by this "item_hash".
     let item_name = input_type.get_name();
 
-    let mut pass_this = LibraryObj::default();
+    let mut pass_this = LibraryObj::new();
     pass_this.user_data = (&input_type).into();
     pass_this.shared_state = copy_shared_mem_data();
     pass_this.crate_name = std::env::var("CARGO_CRATE_NAME").unwrap_or("".into());
