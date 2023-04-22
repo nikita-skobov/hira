@@ -93,7 +93,7 @@ fn struct_item_to_doc_comment(item: &mut ItemStruct) -> String {
 }
 
 #[proc_macro]
-pub fn wasm_modules(items: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn hira_modules(items: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let mut module_paths = vec![];
     for item in items {
         if let proc_macro::TokenTree::Literal(l) = item {
@@ -480,7 +480,7 @@ fn output_shared_files(
 }
 
 #[proc_macro_attribute]
-pub fn wasm_meta(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // this is the data the end user passed to the macro, and we serialize it
     // and pass it to the wasm module that the user specified
     #[derive(WasmTypeGen, Debug)]
@@ -775,7 +775,7 @@ pub fn wasm_meta(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -
     let mut input_type = if let Some(input) = input_type {
         input
     } else {
-        panic!("wasm_meta was applied to an item that we currently do not support parsing. Currently only supports functions and deriveInputs");
+        panic!("hira was applied to an item that we currently do not support parsing. Currently only supports functions and deriveInputs");
     };
     // println!("{:#?}", input_type);
 
