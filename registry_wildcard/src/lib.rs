@@ -4,9 +4,22 @@ use quote::{quote, format_ident};
 /// every time i create a new module in the modules/ directory, so this is a macro
 /// that will just add the `pub mod {MODULE_NAME}` for every file it finds in the modules/ dir
 #[proc_macro]
-pub fn wildcard_modules(_: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn wildcard_modules(items: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let mut items_iter = items.into_iter();
+    let path = match items_iter.next() {
+        Some(proc_macro::TokenTree::Literal(l)) => {
+            let mut path = l.to_string();
+            while path.starts_with('"') && path.ends_with('"') {
+                path.remove(0);
+                path.pop();
+            }
+            path
+        }
+        _ => panic!("wildcard_modules expects first argument to be a literal string"),
+    };
+
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(".".into());
-    let module_dir = format!("{manifest_dir}/src/modules/"); // implicit :shrug:
+    let module_dir = format!("{manifest_dir}{path}");
     let readdir = std::fs::read_dir(&module_dir).expect("failed to readdir while scanning for modules");
     let mut outputs = vec![];
     for entry in readdir {
