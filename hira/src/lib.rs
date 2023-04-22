@@ -21,6 +21,27 @@ use wasm_type_gen::*;
 
 // TODO: need to use locking? proc-macros run single threaded so i think this is safe?
 static mut SHARED_FILE_DATA: Vec<MapEntry<MapEntry<String>>> = vec![];
+static mut DEFAULT_USER_CALLBACKS: Vec<(String, String)> = vec![];
+
+fn get_default_user_cb(mod_name: &str) -> Option<proc_macro2::TokenStream> {
+    unsafe {
+        DEFAULT_USER_CALLBACKS.iter().find_map(|x| if x.0 == mod_name {
+            match proc_macro2::TokenStream::from_str(&x.1) {
+                Ok(out) => Some(out),
+                Err(_) => None,
+            }
+        } else {
+            None
+        })
+    }
+}
+
+fn add_default_user_cb(mod_name: String, cb: proc_macro2::TokenStream) {
+    unsafe {
+        let serialized = cb.to_string();
+        DEFAULT_USER_CALLBACKS.push((mod_name, serialized));
+    }
+}
 
 struct MapEntry<T> {
     pub key: String,
@@ -102,140 +123,180 @@ fn struct_item_to_doc_comment(item: &mut ItemStruct) -> String {
 }
 
 #[proc_macro]
-pub fn hira_modules(items: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let mut module_paths = vec![];
-    for item in items {
-        if let proc_macro::TokenTree::Literal(l) = item {
+pub fn hira_module_default(items: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let items = proc_macro2::TokenStream::from(items);
+    let mut items_iter = items.into_iter();
+    let path = match items_iter.next() {
+        Some(proc_macro2::TokenTree::Literal(l)) => {
             let mut path = l.to_string();
             while path.starts_with('"') && path.ends_with('"') {
                 path.remove(0);
                 path.pop();
             }
-            module_paths.push(path);
+            path
         }
+        _ => panic!("hira_module_default expects first argument to be a literal string of your module path"),
+    };
+
+    match items_iter.next() {
+        Some(proc_macro2::TokenTree::Punct(p)) => {
+            if p.as_char() != ',' {
+                panic!("hira_module_default expects a comma after module path and before your callback");
+            }
+        }
+        _ => panic!("hira_module_default expects a comma after module path and before your callback"),
     }
+    // we assume that the user entered this correctly. we dont do any validation to speed up compilation.
+    // if the user makes an error here, it should be showed to them by their IDE/compiler.
+    let rest_of_items: proc_macro2::TokenStream = items_iter.collect();
 
     let base_dir = get_wasm_base_dir();
-    let mut exports = vec![];
     let mut required_crates = vec![];
-    // load every wasm module and export its types into the file the user is editing
-    for mut path in module_paths {
-        let original_path = path.clone();
-        if !path.ends_with(".rs") {
-            path.push_str(".rs");
+    let (mod_name, mod_def) = match load_module_from_macro_item(&base_dir,  &mut required_crates, path.clone()) {
+        Ok(Some((name, moddef))) => (name, moddef),
+        Ok(None) => panic!("Failed to load module '{path}'"),
+        Err(e) => return e,
+    };
+
+    load_module_handle_required_crates(required_crates);
+
+    let fn_ident = format_ident!("_{mod_name}_default");
+    add_default_user_cb(mod_name, rest_of_items.clone());
+    let expanded = quote! {
+        #mod_def
+
+        fn #fn_ident() {
+            let cb = #rest_of_items;
         }
-        let path_name = PathBuf::from(&path);
-        let path_name = match path_name.file_stem() {
-            Some(f) => f.to_string_lossy().to_string(),
-            None => panic!("Unable to create module name for '{}'", path),
-        };
-        let module_name = format_ident!("{}", path_name);
-        let path = format!("{base_dir}/{path}");
-        let wasm_code = match load_rs_wasm_module(&path) {
-            Ok(c) => c,
-            Err(_) => {
-                let s = format!("Failed to read wasm module '{}'. No file found '{}'", original_path, path);
-                let out = quote! {
-                    compile_error!(#s);
-                };
-                return TokenStream::from(out);
-            }
-        };
-        let mut parsed_wasm_code = match parse_file(&wasm_code) {
-            Ok(p) => p,
-            Err(e) => {
-                panic!("Failed to parse {} as valid rust code. Error:\n{:?}", path, e);
-            }
-        };
-        let exported_type = parsed_wasm_code.items.iter().find_map(|item| match item {
-            syn::Item::Type(ty) => if ty.ident.to_string() == "ExportType" {
-                match *ty.ty {
-                    Type::Path(ref ty) => {
-                        match ty.path.segments.last() {
-                            Some(seg) => {
-                                if ty.path.segments.len() == 1 {
-                                    Some(seg.ident.clone())
-                                } else {
-                                    None
-                                }
+    };
+
+    TokenStream::from(expanded)
+}
+
+fn load_module_from_macro_item(
+    base_dir: &String,
+    required_crates: &mut Vec<(String, Vec<String>)>,
+    mut path: String
+) -> Result<Option<(String, proc_macro2::TokenStream)>, TokenStream> {
+    let original_path = path.clone();
+    if !path.ends_with(".rs") {
+        path.push_str(".rs");
+    }
+    let path_name = PathBuf::from(&path);
+    let path_name = match path_name.file_stem() {
+        Some(f) => f.to_string_lossy().to_string(),
+        None => panic!("Unable to create module name for '{}'", path),
+    };
+    let module_name = format_ident!("{}", path_name);
+    let path = format!("{base_dir}/{path}");
+    let wasm_code = match load_rs_wasm_module(&path) {
+        Ok(c) => c,
+        Err(_) => {
+            let s = format!("Failed to read wasm module '{}'. No file found '{}'", original_path, path);
+            let out = quote! {
+                compile_error!(#s);
+            };
+            return Err(TokenStream::from(out));
+        }
+    };
+    let mut parsed_wasm_code = match parse_file(&wasm_code) {
+        Ok(p) => p,
+        Err(e) => {
+            panic!("Failed to parse {} as valid rust code. Error:\n{:?}", path, e);
+        }
+    };
+    let exported_type = parsed_wasm_code.items.iter().find_map(|item| match item {
+        syn::Item::Type(ty) => if ty.ident.to_string() == "ExportType" {
+            match *ty.ty {
+                Type::Path(ref ty) => {
+                    match ty.path.segments.last() {
+                        Some(seg) => {
+                            if ty.path.segments.len() == 1 {
+                                Some(seg.ident.clone())
+                            } else {
+                                None
                             }
-                            None => None,
                         }
-                    },
-                    _ => None,
+                        None => None,
+                    }
+                },
+                _ => None,
+            }
+        } else {
+            None
+        },
+        _ => None,
+    });
+    let export_type = if let Some(export_type) = exported_type {
+        export_type.to_string()
+    } else {
+        return Ok(None);
+    };
+    let reqs = parsed_wasm_code.items.iter().find_map(|item| {
+        if let syn::Item::Const(c) = item {
+            if c.ident.to_string() == "REQUIRED_CRATES" {
+                let arr = match &*c.expr {
+                    syn::Expr::Array(arr) => arr,
+                    syn::Expr::Reference(r) => {
+                        if let syn::Expr::Array(arr) = &*r.expr {
+                            arr
+                        } else {
+                            return None;
+                        }
+                    }
+                    _ => {
+                        return None;
+                    }
+                };
+                let mut out: Vec<String> = vec![];
+                for item in arr.elems.iter() {
+                    if let syn::Expr::Lit(l) = item {
+                        if let syn::Lit::Str(s) = &l.lit {
+                            let mut s = s.token().to_string();
+                            while s.starts_with('"') && s.ends_with('"') {
+                                s.remove(0);
+                                s.pop();
+                            }
+                            out.push(s);
+                        }
+                    }
                 }
+                return Some(out);
+            }
+        }
+        None
+    });
+    if let Some(requireds) = reqs {
+        required_crates.push((original_path.clone(), requireds));
+    }
+
+    // search the file again and export its type inline:
+    let export_item = parsed_wasm_code.items.iter_mut().find_map(|thing| {
+        match thing {
+            syn::Item::Struct(s) => if s.ident.to_string() == export_type {
+                let struct_def = struct_item_to_doc_comment(s);
+                let attrs = std::mem::take(&mut s.attrs);
+                Some((s, struct_def, attrs))
             } else {
                 None
             },
             _ => None,
-        });
-        let export_type = if let Some(export_type) = exported_type {
-            export_type.to_string()
-        } else {
-            continue;
+        }
+    });
+    if let Some((export, export_str, attrs)) = export_item {
+        let stream = quote! {
+            mod #module_name {
+                #(#attrs)*
+                #[doc = #export_str]
+                #export
+            }
         };
-        let reqs = parsed_wasm_code.items.iter().find_map(|item| {
-            if let syn::Item::Const(c) = item {
-                if c.ident.to_string() == "REQUIRED_CRATES" {
-                    let arr = match &*c.expr {
-                        syn::Expr::Array(arr) => arr,
-                        syn::Expr::Reference(r) => {
-                            if let syn::Expr::Array(arr) = &*r.expr {
-                                arr
-                            } else {
-                                return None;
-                            }
-                        }
-                        _ => {
-                            return None;
-                        }
-                    };
-                    let mut out: Vec<String> = vec![];
-                    for item in arr.elems.iter() {
-                        if let syn::Expr::Lit(l) = item {
-                            if let syn::Lit::Str(s) = &l.lit {
-                                let mut s = s.token().to_string();
-                                while s.starts_with('"') && s.ends_with('"') {
-                                    s.remove(0);
-                                    s.pop();
-                                }
-                                out.push(s);
-                            }
-                        }
-                    }
-                    return Some(out);
-                }
-            }
-            None
-        });
-        if let Some(requireds) = reqs {
-            required_crates.push((original_path.clone(), requireds));
-        }
-
-        // search the file again and export its type inline:
-        let export_item = parsed_wasm_code.items.iter_mut().find_map(|thing| {
-            match thing {
-                syn::Item::Struct(s) => if s.ident.to_string() == export_type {
-                    let struct_def = struct_item_to_doc_comment(s);
-                    let attrs = std::mem::take(&mut s.attrs);
-                    Some((s, struct_def, attrs))
-                } else {
-                    None
-                },
-                _ => None,
-            }
-        });
-        if let Some((export, export_str, attrs)) = export_item {
-            exports.push(quote! {
-                mod #module_name {
-                    #(#attrs)*
-                    #[doc = #export_str]
-                    #export
-                }
-            });
-        }
+        return Ok(Some((path_name, stream)));
     }
+    Ok(None)
+}
 
+fn load_module_handle_required_crates(required_crates: Vec<(String, Vec<String>)>) {
     if !required_crates.is_empty() {
         let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(".".into());
         let manifest_file_path = format!("{manifest_dir}/Cargo.toml");
@@ -264,6 +325,37 @@ pub fn hira_modules(items: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
         }
     }
+}
+
+#[proc_macro]
+pub fn hira_modules(items: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let mut module_paths = vec![];
+    for item in items {
+        if let proc_macro::TokenTree::Literal(l) = item {
+            let mut path = l.to_string();
+            while path.starts_with('"') && path.ends_with('"') {
+                path.remove(0);
+                path.pop();
+            }
+            module_paths.push(path);
+        }
+    }
+
+    let base_dir = get_wasm_base_dir();
+    let mut exports = vec![];
+    let mut required_crates = vec![];
+    // load every wasm module and export its types into the file the user is editing
+    for path in module_paths {
+        match load_module_from_macro_item(&base_dir, &mut required_crates, path) {
+            Ok(Some((_, moddef))) => {
+                exports.push(moddef);
+            }
+            Err(e) => return e,
+            _ => continue,
+        }
+    }
+
+    load_module_handle_required_crates(required_crates);
 
     let expanded = quote! {
         #(#exports)*
@@ -911,6 +1003,24 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
     add_to_code.push_str(library_obj_extra_impl);
     add_to_code.push_str(user_data_extra_impl);
 
+    let users_fn_def = if let Some(defcb) = get_default_user_cb(module_name) {
+        quote! {
+            pub fn users_fn(data: &mut #module_name_ident::#exported_name) {
+                let cb = #attr;
+                let default_cb = #defcb;
+                default_cb(data);
+                cb(data);
+            }
+        }
+    } else {
+        quote! {
+            pub fn users_fn(data: &mut #module_name_ident::#exported_name) {
+                let cb = #attr;
+                cb(data);
+            }
+        }
+    };
+
     let final_wasm_source = quote! {
         pub fn wasm_main(library_obj: &mut LibraryObj) {
             #module_name_ident::wasm_entrypoint(library_obj, users_fn);
@@ -920,10 +1030,7 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
             use super::UserData;
             #parsed_wasm_code
         }
-        pub fn users_fn(data: &mut #module_name_ident::#exported_name) {
-            let cb = #attr;
-            cb(data);
-        }
+        #users_fn_def
     };
 
     fn get_wasm_output(
