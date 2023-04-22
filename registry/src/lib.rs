@@ -1,2 +1,2 @@
 pub mod modules;
-pub mod tests;
+pub mod module_testing;
