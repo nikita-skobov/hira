@@ -1,6 +1,9 @@
 [workspace]
 members = [
-    "hira"
+    "hira",
+    "real_world_examples",
+    "registry",
+    "registry_wildcard",
 ]
 
 # compile dependencies in release mode
