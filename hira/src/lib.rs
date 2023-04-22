@@ -196,22 +196,85 @@ pub fn hira_module_default(items: proc_macro::TokenStream) -> proc_macro::TokenS
     TokenStream::from(expanded)
 }
 
+/// four types of modules depending on the string provided:
+/// - absolute file path module
+/// - remote module
+/// - relative file path module
+/// - implied module directory
+/// we use the following methods to detect which type of module we will load
+/// - absolute file path. we detect these if they start with /
+/// - if its not the above, we cheeck if it is a remote module.
+///   remote modules can come in 2 flavors:
+///     - a namespace + modulename format like "mygithubusername:myrepository:"
+///       we detect these by checking if there are exactly 2 colons, and the last
+///       character must be a colon.
+///     - an exact URL. we detect these if it starts with http:// or https://
+/// - if not any of the above, then check if its a relative file path.
+///   we detect these by checking if there is a / somewhere in the string.
+/// - if its none of the above, we check if its a module name. these don't contain
+///   any / at all, and can optionally end with the rust file extension .rs
+///   if we find this, then we assume it's in the hira/modules directory.
+/// # Behaviors:
+/// - absolute file path module OR relative file path module:
+///     - copy the file to the hira/modules directory
+/// - remote module:
+///     - make GET request to fetch the module file to memory, save to hira/modules
+/// - implied module directory:
+///     - assume it's already in hira/modules and try to read from there.
+fn extract_module_from_path(mut path: String) -> String {
+    let is_absolute = path.starts_with("/");
+    let is_namespace_modname_format = path.ends_with(":") && path.match_indices(":").collect::<Vec<_>>().len() == 2;
+    let is_remote = path.starts_with("http://") || path.starts_with("https://") || is_namespace_modname_format;
+    let is_relative = path.contains("/");
+    let is_implied = !is_relative && !path.ends_with(":");
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(".".into());
+    if is_absolute || is_relative {
+        let source_path = if is_relative {
+            format!("{}/{}", manifest_dir, path)
+        } else {
+            path.clone()
+        };
+        let pathbuf = PathBuf::from(&source_path);
+        let path_name = match pathbuf.file_stem() {
+            Some(f) => f.to_string_lossy().to_string(),
+            None => panic!("Unable to determine module name for '{}'", path),
+        };
+        let base_dir = get_wasm_base_dir();
+        let out_path = format!("{base_dir}/{path_name}.rs");
+        match std::fs::copy(pathbuf, &out_path) {
+            Ok(_) => return path_name,
+            Err(e) => panic!("Failed to copy module '{}' to '{}'\nError:\n{:?}", source_path, out_path, e),
+        }
+    }
+
+    if is_remote {
+        unimplemented!("hira currently does not support remote modules");
+    }
+
+    if is_implied {
+        if !path.ends_with(".rs") {
+            path.push_str(".rs");
+        }
+        let path_name = PathBuf::from(&path);
+        let path_name = match path_name.file_stem() {
+            Some(f) => f.to_string_lossy().to_string(),
+            None => panic!("Unable to determine module name for '{}'", path),
+        };
+        return path_name
+    }
+
+    panic!("Unable to determine module format for '{}'", path);
+}
+
 fn load_module_from_macro_item(
     base_dir: &String,
     required_crates: &mut Vec<(String, Vec<String>)>,
-    mut path: String
+    path: String
 ) -> Result<Option<(String, proc_macro2::TokenStream)>, TokenStream> {
     let original_path = path.clone();
-    if !path.ends_with(".rs") {
-        path.push_str(".rs");
-    }
-    let path_name = PathBuf::from(&path);
-    let path_name = match path_name.file_stem() {
-        Some(f) => f.to_string_lossy().to_string(),
-        None => panic!("Unable to create module name for '{}'", path),
-    };
+    let path_name = extract_module_from_path(path);
     let module_name = format_ident!("{}", path_name);
-    let path = format!("{base_dir}/{path}");
+    let path = format!("{base_dir}/{path_name}.rs");
     let wasm_code = match load_rs_wasm_module(&path) {
         Ok(c) => c,
         Err(_) => {
