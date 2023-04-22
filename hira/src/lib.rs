@@ -1001,6 +1001,12 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
             panic!("Error while reading file '{}' for module {module_name}. {:?}", module_path, e);
         }
     };
+    let ignore_str = "#[hira::hira] mod _typehints {}";
+    let wasm_module_source = if let Some(index) = wasm_module_source.find(ignore_str) {
+        &wasm_module_source[index + ignore_str.len()..]
+    } else {
+        &wasm_module_source[..]
+    };
     let parsed_wasm_code = match parse_file(&wasm_module_source) {
         Ok(p) => p,
         Err(e) => {
