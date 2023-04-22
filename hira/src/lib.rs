@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::{path::PathBuf, io::Write};
 use std::str::FromStr;
 use toml::Table;
@@ -22,6 +23,28 @@ use wasm_type_gen::*;
 // TODO: need to use locking? proc-macros run single threaded so i think this is safe?
 static mut SHARED_FILE_DATA: Vec<MapEntry<MapEntry<String>>> = vec![];
 static mut DEFAULT_USER_CALLBACKS: Vec<(String, String)> = vec![];
+static mut SHARED_MEM_DATA: Option<HashMap<String, String>> = None;
+
+fn copy_shared_mem_data() -> HashMap<String, String> {
+    unsafe {
+        if SHARED_MEM_DATA.is_none() {
+            SHARED_MEM_DATA = Some(HashMap::new());
+        }
+        SHARED_MEM_DATA.clone().unwrap()
+    }
+}
+
+fn save_shared_mem_data(data: HashMap<String, String>) {
+    unsafe {
+        if let Some(existing_data) = &mut SHARED_MEM_DATA {
+            for (key, value) in data {
+                if !existing_data.contains_key(&key) {
+                    existing_data.insert(key, value);
+                }
+            }
+        }
+    }
+}
 
 fn get_default_user_cb(mod_name: &str) -> Option<proc_macro2::TokenStream> {
     unsafe {
@@ -640,6 +663,12 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
         pub crate_name: String,
         pub user_data: UserData,
         pub shared_output_data: Vec<SharedOutputEntry>,
+        /// a shared key/value store for accessing data across wasm module invocations.
+        /// this can be both used by you as a module writer, as well as optionally exposing
+        /// this to users by providing this data in your exported struct.
+        /// NOTE: this is append only + read. a wasm module cannot modify/delete existing key/value pairs
+        /// but it CAN read them, as well as append new ones.
+        pub shared_state: std::collections::HashMap<String, String>,
     }
 
     fn to_map_entry(data: Vec<SharedOutputEntry>) -> Vec<MapEntry<MapEntry<(bool, String, Option<String>)>>> {
@@ -996,6 +1025,7 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
 
     let mut pass_this = LibraryObj::default();
     pass_this.user_data = (&input_type).into();
+    pass_this.shared_state = copy_shared_mem_data();
     pass_this.crate_name = std::env::var("CARGO_CRATE_NAME").unwrap_or("".into());
     let mut add_to_code = LibraryObj::include_in_rs_wasm();
     add_to_code.push_str(LibraryObj::gen_entrypoint());
@@ -1078,6 +1108,7 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
         add_after.push(tokens);
     }
 
+    save_shared_mem_data(std::mem::take(&mut lib_obj.shared_state));
     if should_output_command_files {
         if let Err(e) = lib_obj.handle_file_ops(module_name, &item_name) {
             panic!("{}", e);
