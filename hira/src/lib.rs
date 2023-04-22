@@ -27,15 +27,24 @@ struct MapEntry<T> {
     pub lines: Vec<T>,
 }
 
-fn get_wasm_base_dir() -> String {
+fn get_wasmout_dir() -> String {
+    format!("hira/wasm_out")
+}
+
+fn get_hira_directory() -> String {
     let base_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(".".into());
-    let base_dir = format!("{base_dir}/wasm_modules");
+    format!("{base_dir}/hira")
+}
+
+fn get_wasm_base_dir() -> String {
+    let base_dir = get_hira_directory();
+    let base_dir = format!("{base_dir}/modules");
     base_dir
 }
 
 fn get_wasmgen_base_dir() -> String {
-    let base_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(".".into());
-    format!("{base_dir}/wasmgen")
+    let base_dir = get_hira_directory();
+    format!("{base_dir}/generated")
 }
 
 fn should_do_file_operations() -> bool {
@@ -923,7 +932,8 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
         add_to_source: Option<String>,
         data_to_pass: &LibraryObj,
     ) -> Option<LibraryObj> {
-        let out_file = compile_string_to_wasm(out_name_hash, wasm_source, add_to_source).expect("compilation error");
+        let out_dir = Some(get_wasmout_dir());
+        let out_file = compile_string_to_wasm(out_name_hash, wasm_source, add_to_source, out_dir).expect("compilation error");
         let wasm_file = std::fs::read(out_file).expect("failed to read wasm binary");
         let out = run_wasm(&wasm_file, data_to_pass.to_binary_slice()).expect("runtime error running wasm");
         LibraryObj::from_binary_slice(out)
