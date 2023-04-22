@@ -1,0 +1,15 @@
+[package]
+name = "hira"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+proc-macro2 = "1.0.52"
+syn = { version = "2", features = ["extra-traits"] }
+quote = "1"
+wasm_type_gen = { git = "https://github.com/nikita-skobov/wasm_type_gen" }
+adler32 = "*"
+toml = "0.7.3"
+
+[lib]
+proc-macro = true
