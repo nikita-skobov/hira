@@ -1,1 +1,1 @@
-registry_wildcard::wildcard_modules!();
+registry_wildcard::wildcard_modules!("/src/modules/");

@@ -1,3 +1,2 @@
-mod modules;
-pub use modules::*;
-
+pub mod modules;
+pub mod tests;
