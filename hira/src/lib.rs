@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::{path::PathBuf, io::Write};
 use std::str::FromStr;
+use syn::Item;
 use toml::Table;
 
 use proc_macro::TokenStream;
@@ -691,7 +692,10 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
         Struct { name: String, is_pub: bool, fields: Vec<UserField> },
         /// inputs are read only. modifying them in your wasm_module has no effect.
         Function { name: String, is_pub: bool, is_async: bool, inputs: Vec<UserInput>, return_ty: String },
-        Module { name: String, is_pub: bool, },
+        /// The body is a stringified version of the module body. You can use this to search through and do minimal
+        /// static analysis. The existing body is read only, however you can append to the body by adding lines
+        /// after the existing body via `append_to_body`.
+        Module { name: String, is_pub: bool, body: String, append_to_body: Vec<String> },
         GlobalVariable { name: String, is_pub: bool, },
         Match { name: String, is_pub: bool },
         Missing,
@@ -825,7 +829,18 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
                     Self::GlobalVariable { name, is_pub: is_public(&x.vis) }
                 }
                 InputType::Module(x) => {
-                    Self::Module { name, is_pub: is_public(&x.vis) }
+                    let body = match &x.content {
+                        Some((_, items)) => {
+                            let mut out = "".to_string();
+                            for item in items {
+                                out.push_str(&item.to_token_stream().to_string());
+                                out.push('\n');
+                            }
+                            out
+                        }
+                        None => "".into(),
+                    };
+                    Self::Module { name, is_pub: is_public(&x.vis), body, append_to_body: vec![] }
                 }
                 InputType::Match(_x) => {
                     // TODO: implement iterating match arms
@@ -836,7 +851,7 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
     }
 
     impl InputType {
-        pub fn apply_library_obj_changes(&mut self, lib_obj: LibraryObj) {
+        pub fn apply_library_obj_changes(&mut self, lib_obj: LibraryObj, wasm_module_name: &str) {
             let user_data = lib_obj.user_data;
             match (self, user_data) {
                 (InputType::Struct(x), UserData::Struct { name, is_pub, .. }) => {
@@ -855,8 +870,21 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
                     rename_ident(&mut x.ident, &name);
                     set_visibility(&mut x.vis, is_pub);
                 }
-                (InputType::Module(x), UserData::Module { name, is_pub, .. }) => {
+                (InputType::Module(x), UserData::Module { name, is_pub, append_to_body, .. }) => {
                     rename_ident(&mut x.ident, &name);
+                    if let Some((_, content)) = &mut x.content {
+                        for line in append_to_body {
+                            let s = match proc_macro2::TokenStream::from_str(&line) {
+                                Ok(s) => s,
+                                Err(e) => panic!("Module {wasm_module_name} attempted to add an invalid line to mod def {name}\nError:\n{:?}", e),
+                            };
+                            let c = match syn::parse2::<Item>(s) {
+                                Ok(s) => s,
+                                Err(e) => panic!("Module {wasm_module_name} attempted to add an invalid line to mod def {name}\nError:\n{:?}", e),
+                            };
+                            content.push(c);
+                        }
+                    }
                     set_visibility(&mut x.vis, is_pub);
                 }
                 _ => {}
@@ -1219,7 +1247,7 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
         }
     }
 
-    input_type.apply_library_obj_changes(lib_obj);
+    input_type.apply_library_obj_changes(lib_obj, module_name);
     let item = input_type.back_to_stream(&format!("_b{hash}"));
     let user_out = quote! {
         // we use a random hash for the func name to not conflict with other invocations of this macro
