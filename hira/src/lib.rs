@@ -1117,9 +1117,6 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
                 if fn_item.sig.ident.to_string() != "wasm_entrypoint" {
                     return false
                 }
-                if let syn::ReturnType::Default = fn_item.sig.output {} else {
-                    return false
-                }
                 // enforce 2 args: the first is the LibraryObj
                 // the 2nd is the callback to the user's function.
                 // but too lazy to parse the callback signature right now. we just assume its valid..
@@ -1199,7 +1196,7 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
 
     let final_wasm_source = quote! {
         pub fn wasm_main(library_obj: &mut LibraryObj) {
-            #module_name_ident::wasm_entrypoint(library_obj, users_fn);
+            let _ = #module_name_ident::wasm_entrypoint(library_obj, users_fn);
         }
         mod #module_name_ident {
             use super::LibraryObj;
