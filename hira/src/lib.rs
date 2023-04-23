@@ -444,6 +444,7 @@ pub fn hira_modules(items: proc_macro::TokenStream) -> proc_macro::TokenStream {
     }
 
     let base_dir = get_wasm_base_dir();
+    let _ = std::fs::create_dir_all(&base_dir);
     let mut exports = vec![];
     let mut required_crates = vec![];
     // load every wasm module and export its types into the file the user is editing
@@ -516,7 +517,7 @@ impl InputType {
                 let use_name_ident = format_ident!("{use_name}");
                 quote! {
                     fn #use_name_ident() {
-                        #m
+                        #m;
                     }
                 }
             }
@@ -698,13 +699,25 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
         /// after the existing body via `append_to_body`.
         Module { name: String, is_pub: bool, body: String, append_to_body: Vec<String> },
         GlobalVariable { name: String, is_pub: bool, },
-        Match { name: String, is_pub: bool },
+        Match { name: String, is_pub: bool, arms: Vec<MatchArm> },
         Missing,
     }
     impl Default for UserData {
         fn default() -> Self {
             Self::Missing
         }
+    }
+
+    #[derive(WasmTypeGen, Debug)]
+    pub struct MatchArm {
+        pub pattern: MatchPattern,
+        pub expr: String,
+    }
+
+    #[derive(WasmTypeGen, Debug)]
+    pub enum MatchPattern {
+        Wildcard,
+        String(String),
     }
 
     #[derive(WasmTypeGen, Debug)]
@@ -843,9 +856,28 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
                     };
                     Self::Module { name, is_pub: is_public(&x.vis), body, append_to_body: vec![] }
                 }
-                InputType::Match(_x) => {
-                    // TODO: implement iterating match arms
-                    Self::Match { name, is_pub: false }
+                InputType::Match(x) => {
+                    let mut arms = vec![];
+                    for arm in x.arms.iter() {
+                        let pattern = match &arm.pat {
+                            syn::Pat::Wild(_) => MatchPattern::Wildcard,
+                            x => {
+                                let mut s = x.to_token_stream().to_string();
+                                while s.starts_with('"') && s.ends_with('"') {
+                                    s.remove(0);
+                                    s.pop();
+                                }
+                                MatchPattern::String(s)
+                            }
+                        };
+                        let mut expr = arm.body.to_token_stream().to_string();
+                        while expr.starts_with('"') && expr.ends_with('"') {
+                            expr.remove(0);
+                            expr.pop();
+                        }
+                        arms.push(MatchArm { pattern, expr })
+                    }
+                    Self::Match { name, is_pub: false, arms }
                 }
             }
         }
@@ -1046,7 +1078,6 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
     } else {
         panic!("hira was applied to an item that we currently do not support parsing. Currently only supports functions and deriveInputs");
     };
-    // println!("{:#?}", input_type);
 
     // get everything in callback input signature |mything: &mut modulename::StructName| { ... }
     let splits: Vec<_> = attr_str.split("|").collect();
