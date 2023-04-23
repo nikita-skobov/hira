@@ -656,6 +656,7 @@ fn output_shared_files(
     // iterate the shared data object and output to the shared file(s)
 
     let shared_dir = get_wasmgen_base_dir();
+    let _ = std::fs::create_dir(&shared_dir);
 
     unsafe {
         for file_entry in SHARED_FILE_DATA.iter_mut() {
@@ -909,6 +910,19 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
         #[allow(dead_code)]
         fn compile_error(&mut self, err_msg: &str) {
             self.compiler_error_message = err_msg.into();
+        }
+        /// a simple utility for generating 'hashes' based on some arbitrary input.
+        /// Read more about adler32 here: https://en.wikipedia.org/wiki/Adler-32
+        #[allow(dead_code)]
+        fn adler32(&mut self, data: &[u8]) -> u32 {
+            let mod_adler = 65521;
+            let mut a: u32 = 1;
+            let mut b: u32 = 0;
+            for &byte in data {
+                a = (a + byte as u32) % mod_adler;
+                b = (b + a) % mod_adler;
+            }
+            (b << 16) | a
         }
         /// given a file name (no paths. the file will appear in ./wasmgen/{filename})
         /// and a label, and a line (string) append to the file. create the file if it doesnt exist.
