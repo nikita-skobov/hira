@@ -265,7 +265,7 @@ pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut LambdaInput)) {
     let md5cmd = format!("md5{users_func_name}=($(md5sum ./bootstrap))");
     let zipcmd = format!("zip -r {users_func_name}_$md5{users_func_name}.zip bootstrap");
     let deployartifactcmd = format!("aws s3 cp {users_func_name}_$md5{users_func_name}.zip \"s3://$artifactbucketname{users_func_name}/\"");
-    let deploycfncmd = format!("AWS_REGION=\"{region}\" aws --region {region} cloudformation deploy --stack-name hira-gen-stack --template-file deploy.yml --capabilities CAPABILITY_NAMED_IAM --parameter-overrides ");
+    let deploycfncmd = format!("AWS_REGION=\"{region}\" aws --region {region} cloudformation deploy --stack-name hira-gen-stack --template-file deploy.yml --capabilities CAPABILITY_NAMED_IAM --parameter-overrides DefaultParam=hira ");
 
     let param1 = format!("{bucket_param}=$artifactbucketname{users_func_name}");
     let param2 = format!("{key_param}={users_func_name}_$md5{users_func_name}.zip");
@@ -290,6 +290,7 @@ pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut LambdaInput)) {
 
     obj.append_to_file_unique(cfn_file, "# 0", "AWSTemplateFormatVersion: '2010-09-09'".into());
     obj.append_to_file_unique(cfn_file, "# 0", "Parameters:".into());
+    obj.append_to_file_unique(cfn_file, "# 1", format!("    DefaultParam:\n        Type: String"));
     obj.append_to_file(cfn_file, "# 1", format!("    {bucket_param}:\n        Type: String"));
     obj.append_to_file(cfn_file, "# 1", format!("    {key_param}:\n        Type: String"));
     obj.append_to_file_unique(cfn_file, "# 2", "Resources:".into());

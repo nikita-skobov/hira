@@ -6,7 +6,7 @@ mod tests {
     fn user_data_must_be_function() {
         let cb = |_a: &mut LambdaInput| {};
         let mut obj = LibraryObj::new();
-        obj.user_data = UserData::Module { name: "".into(), is_pub: true };
+        obj.user_data = UserData::Module { name: "".into(), is_pub: true, body: "".to_string(), append_to_body: vec![] };
         wasm_entrypoint(&mut obj, cb as _);
         assert_eq!(obj.compiler_error_message, "This module can only be applied to a function");
     }
