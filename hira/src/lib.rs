@@ -24,6 +24,35 @@ use wasm_type_gen::*;
 static mut SHARED_FILE_DATA: Vec<MapEntry<MapEntry<String>>> = vec![];
 static mut DEFAULT_USER_CALLBACKS: Vec<(String, String)> = vec![];
 static mut SHARED_MEM_DATA: Option<HashMap<String, String>> = None;
+static mut KNOWN_DEPENDENCIES: Option<Vec<String>> = None;
+
+fn get_known_dependencies() -> Vec<String> {
+    unsafe {
+        if KNOWN_DEPENDENCIES.is_none() {
+            let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(".".into());
+            let manifest_file_path = format!("{manifest_dir}/Cargo.toml");
+            let cargo_file_str = match std::fs::read_to_string(manifest_file_path) {
+                Ok(o) => o,
+                Err(e) => panic!("One or more of your wasm modules has REQUIRED_CRATES. But failed to find Cargo.toml.\nError:\n{:?}", e),
+            };
+            let value = cargo_file_str.parse::<Table>().unwrap();
+            let mut dependencies = vec![];
+            if let Some(deps) = value.get("dependencies") {
+                if let toml::Value::Table(deps) = deps {
+                    for (key, _) in deps {
+                        dependencies.push(key.clone());
+                    }
+                }
+            }
+            KNOWN_DEPENDENCIES = Some(dependencies);
+        }
+        if let Some(deps) = &KNOWN_DEPENDENCIES {
+            deps.clone()
+        } else {
+            vec![]
+        }
+    }
+}
 
 fn copy_shared_mem_data() -> HashMap<String, String> {
     unsafe {
@@ -384,21 +413,7 @@ fn load_module_from_macro_item(
 
 fn load_module_handle_required_crates(required_crates: Vec<(String, Vec<String>)>) {
     if !required_crates.is_empty() {
-        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(".".into());
-        let manifest_file_path = format!("{manifest_dir}/Cargo.toml");
-        let cargo_file_str = match std::fs::read_to_string(manifest_file_path) {
-            Ok(o) => o,
-            Err(e) => panic!("One or more of your wasm modules has REQUIRED_CRATES. But failed to find Cargo.toml.\nError:\n{:?}", e),
-        };
-        let value = cargo_file_str.parse::<Table>().unwrap();
-        let mut dependencies = vec![];
-        if let Some(deps) = value.get("dependencies") {
-            if let toml::Value::Table(deps) = deps {
-                for (key, _) in deps {
-                    dependencies.push(key);
-                }
-            }
-        }
+        let dependencies = get_known_dependencies();
         for (wasm_mod_name, requireds) in required_crates {
             let mut missing = vec![];
             for req in requireds.iter() {
@@ -732,6 +747,9 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
         /// NOTE: this is append only + read. a wasm module cannot modify/delete existing key/value pairs
         /// but it CAN read them, as well as append new ones.
         pub shared_state: std::collections::HashMap<String, String>,
+        /// names of dependencies that the user has specified in their Cargo.toml.
+        /// NOTE: these are read only.
+        pub dependencies: Vec<String>,
     }
 
     fn to_map_entry(data: Vec<SharedOutputEntry>) -> Vec<MapEntry<MapEntry<(bool, String, Option<String>)>>> {
@@ -857,6 +875,7 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
                 user_data: UserData::new(),
                 shared_output_data: Default::default(),
                 shared_state: Default::default(),
+                dependencies: Default::default(),
             }
         }
         #[allow(dead_code)]
@@ -1109,6 +1128,7 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
 
     let mut pass_this = LibraryObj::new();
     pass_this.user_data = (&input_type).into();
+    pass_this.dependencies = get_known_dependencies();
     pass_this.shared_state = copy_shared_mem_data();
     pass_this.crate_name = std::env::var("CARGO_CRATE_NAME").unwrap_or("".into());
     let mut add_to_code = LibraryObj::include_in_rs_wasm();
