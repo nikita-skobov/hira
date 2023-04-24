@@ -699,7 +699,7 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
         /// after the existing body via `append_to_body`.
         Module { name: String, is_pub: bool, body: String, append_to_body: Vec<String> },
         GlobalVariable { name: String, is_pub: bool, },
-        Match { name: String, is_pub: bool, arms: Vec<MatchArm> },
+        Match { name: String, expr: Vec<String>, is_pub: bool, arms: Vec<MatchArm> },
         Missing,
     }
     impl Default for UserData {
@@ -710,14 +710,8 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
 
     #[derive(WasmTypeGen, Debug)]
     pub struct MatchArm {
-        pub pattern: MatchPattern,
+        pub pattern: Vec<Option<String>>,
         pub expr: String,
-    }
-
-    #[derive(WasmTypeGen, Debug)]
-    pub enum MatchPattern {
-        Wildcard,
-        String(String),
     }
 
     #[derive(WasmTypeGen, Debug)]
@@ -860,14 +854,35 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
                     let mut arms = vec![];
                     for arm in x.arms.iter() {
                         let pattern = match &arm.pat {
-                            syn::Pat::Wild(_) => MatchPattern::Wildcard,
+                            syn::Pat::Tuple(tpl) => {
+                                let mut out = vec![];
+                                for thing in tpl.elems.iter() {
+                                    match thing {
+                                        syn::Pat::Wild(_) => {
+                                            out.push(None);
+                                        }
+                                        x => {
+                                            let mut s = x.to_token_stream().to_string();
+                                            while s.starts_with('"') && s.ends_with('"') {
+                                                s.remove(0);
+                                                s.pop();
+                                            }
+                                            out.push(Some(s));
+                                        }
+                                    }
+                                }
+                                out
+                            }
+                            syn::Pat::Wild(_) => {
+                                vec![None]
+                            }
                             x => {
                                 let mut s = x.to_token_stream().to_string();
                                 while s.starts_with('"') && s.ends_with('"') {
                                     s.remove(0);
                                     s.pop();
                                 }
-                                MatchPattern::String(s)
+                                vec![Some(s)]
                             }
                         };
                         let mut expr = arm.body.to_token_stream().to_string();
@@ -877,7 +892,28 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
                         }
                         arms.push(MatchArm { pattern, expr })
                     }
-                    Self::Match { name, is_pub: false, arms }
+                    let mut expr = vec![];
+                    match &*x.expr {
+                        syn::Expr::Tuple(tpl) => {
+                            for item in tpl.elems.iter() {
+                                let mut s = item.to_token_stream().to_string();
+                                while s.starts_with('"') && s.ends_with('"') {
+                                    s.remove(0);
+                                    s.pop();
+                                }
+                                expr.push(s);    
+                            }
+                        }
+                        x => {
+                            let mut s = x.to_token_stream().to_string();
+                            while s.starts_with('"') && s.ends_with('"') {
+                                s.remove(0);
+                                s.pop();
+                            }
+                            expr.push(s);
+                        }
+                    }
+                    Self::Match { name, expr, is_pub: false, arms }
                 }
             }
         }
