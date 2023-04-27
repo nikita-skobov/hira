@@ -4,9 +4,17 @@ use proc_macro2::TokenStream;
 use quote::{quote, format_ident, ToTokens};
 use syn::parse_file;
 
+use crate::parsing::remove_surrounding_quotes;
+
 use super::HiraConfig;
 use super::parsing::{default_stream, compiler_error, iterate_file, iterate_expr_for_strings, get_list_of_strings};
 use super::use_hira_config;
+
+pub const FN_ENTRYPOINT_NAME: &'static str = "wasm_entrypoint";
+pub const LIB_OBJ_TYPE_NAME: &'static str = "LibraryObj";
+pub const REQUIRED_CRATES_NAME: &'static str = "REQUIRED_CRATES";
+pub const REQUIRED_HIRA_MODS_NAME: &'static str = "REQUIRED_HIRA_MODULES";
+pub const HIRA_MOD_NAME_NAME: &'static str = "HIRA_MODULE_NAME";
 
 #[derive(Debug)]
 pub enum LoadedFrom {
@@ -59,10 +67,24 @@ impl HiraModule {
         };
         stream
     }
+    pub fn verify(&self) -> String {
+        let mut out = String::new();
+        if self.name.is_empty() {
+            out = format!("Failed to find `const {HIRA_MOD_NAME_NAME}`\nMust provide a hira module name");
+            return out;
+        }
+        let split = self.name.split("_");
+        let num_components = split.into_iter().count();
+        if num_components != 2 {
+            out = format!("Invalid `const {HIRA_MOD_NAME_NAME} = \"{}\"`\nhira module name must contain 1 underscore.", self.name);
+            return out;
+        }
+        out
+    }
 }
 
 fn set_entrypoint_fn(module: &mut HiraModule, item: &syn::ItemFn) -> bool {
-    if item.sig.ident.to_string() != "wasm_entrypoint" {
+    if item.sig.ident.to_string() != FN_ENTRYPOINT_NAME {
         return true
     }
     // enforce 2 args: the first is the LibraryObj
@@ -92,7 +114,7 @@ fn set_entrypoint_fn(module: &mut HiraModule, item: &syn::ItemFn) -> bool {
         Some(s) => s,
         None => return true,
     };
-    if first.ident.to_string() != "LibraryObj" {
+    if first.ident.to_string() != LIB_OBJ_TYPE_NAME {
         return true
     }
     // we verified this is the wasm_entrypoint fn, so set its signature to the module
@@ -101,7 +123,7 @@ fn set_entrypoint_fn(module: &mut HiraModule, item: &syn::ItemFn) -> bool {
 }
 
 fn set_required_crates(module: &mut HiraModule, item: &syn::ItemConst) -> bool {
-    if item.ident.to_string() != "REQUIRED_CRATES" {
+    if item.ident.to_string() != REQUIRED_CRATES_NAME {
         return true;
     }
     iterate_expr_for_strings(&*item.expr, |a| {
@@ -110,8 +132,22 @@ fn set_required_crates(module: &mut HiraModule, item: &syn::ItemConst) -> bool {
     true
 }
 
+fn set_module_name(module: &mut HiraModule, item: &syn::ItemConst) -> bool {
+    if item.ident.to_string() != HIRA_MOD_NAME_NAME {
+        return true;
+    }
+    if let syn::Expr::Lit(l) = &*item.expr {
+        if let syn::Lit::Str(s) = &l.lit {
+            let mut s = s.value();
+            remove_surrounding_quotes(&mut s);
+            module.name = s;
+        }
+    }
+    true
+}
+
 fn set_required_hira_mods(module: &mut HiraModule, item: &syn::ItemConst) -> bool {
-    if item.ident.to_string() != "REQUIRED_HIRA_MODULES" {
+    if item.ident.to_string() != REQUIRED_HIRA_MODS_NAME {
         return true;
     }
     iterate_expr_for_strings(&*item.expr, |a| {
@@ -226,7 +262,7 @@ fn load_module_from_file_string(_conf: &mut HiraConfig, path: &str, module_strin
     let contents = iterate_file(
         &mut out, module_file,
         &[set_entrypoint_fn, set_exports::set_export_item_fn],
-        &[set_required_crates, set_required_hira_mods, set_exports::set_export_item_const],
+        &[set_required_crates, set_required_hira_mods, set_exports::set_export_item_const, set_module_name],
         &[set_primary_export_item, set_exports::set_export_item_type],
         &[set_exports::set_export_item_enum],
         &[set_exports::set_export_item_mod, remove_recursive_hira_macro],
@@ -236,6 +272,12 @@ fn load_module_from_file_string(_conf: &mut HiraConfig, path: &str, module_strin
         &[set_exports::set_export_item_union],
     );
     out.contents = contents;
+
+    let err_str = out.verify();
+    if !err_str.is_empty() {
+        return Err(err_str);
+    }
+
     Ok(out)
 }
 
@@ -372,10 +414,34 @@ mod tests {
     fn can_remove_recursive_macro() {
         let code = r#"
         #[hira::hira] mod _typehints {}
-        fn hello() {}
+        const HIRA_MODULE_NAME: &'static str = "a_b";
         "#;
         let mut conf = HiraConfig::default();
         let res = load_module_from_file_string(&mut conf, "a", code.to_string()).unwrap();
-        assert_eq!(res.contents, "fn hello () { }\n");
+        assert_eq!(res.contents, "const HIRA_MODULE_NAME : & 'static str = \"a_b\" ;\n");
+    }
+
+    #[test]
+    fn fails_if_module_name_not_provided() {
+        let code = r#"
+        const HIRA_MODULE_NAME_WRONG: &'static str = "aaa";
+        "#;
+        let mut conf = HiraConfig::default();
+        let res = load_module_from_file_string(&mut conf, "a", code.to_string());
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        assert_eq!(err, "Failed to find `const HIRA_MODULE_NAME`\nMust provide a hira module name");
+    }
+
+    #[test]
+    fn can_load_module_name() {
+        let code = r#"
+        const HIRA_MODULE_NAME: &'static str = "hello_world";
+        "#;
+        let mut conf = HiraConfig::default();
+        let res = load_module_from_file_string(&mut conf, "a", code.to_string());
+        assert!(res.is_ok());
+        let module = res.ok().unwrap();
+        assert_eq!(module.name, "hello_world");
     }
 }
