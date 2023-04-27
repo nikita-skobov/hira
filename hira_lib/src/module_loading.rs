@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident, ToTokens};
@@ -58,16 +59,24 @@ impl Default for HiraModule {
 impl HiraModule {
     pub fn to_token_stream(&self) -> TokenStream {
         let module_name = format_ident!("{}", self.name);
+        let export_items: Vec<TokenStream> = self.export_items.iter().map(|(_, v)| {
+            TokenStream::from_str(v)
+        })
+        .filter_map(|x| x.ok())
+        .collect();
+
+        // TODO: find a nice way to export the doc comment of the main export item...
+        // #(#attrs)*
+        // #[doc = #export_str]
+        // #export
         let stream = quote! {
             mod #module_name {
-                // #(#attrs)*
-                // #[doc = #export_str]
-                // #export
+                #(#export_items)*
             }
         };
         stream
     }
-    pub fn verify(&self) -> String {
+    pub fn verify(&self, conf: &HiraConfig) -> String {
         let mut out = String::new();
         if self.name.is_empty() {
             out = format!("Failed to find `const {HIRA_MOD_NAME_NAME}`\nMust provide a hira module name");
@@ -77,6 +86,10 @@ impl HiraModule {
         let num_components = split.into_iter().count();
         if num_components != 2 {
             out = format!("Invalid `const {HIRA_MOD_NAME_NAME} = \"{}\"`\nhira module name must contain 1 underscore.", self.name);
+            return out;
+        }
+        if conf.loaded_modules.contains_key(&self.name) {
+            out = format!("Duplicate module loading error. '{}' already exists", self.name);
             return out;
         }
         out
@@ -249,7 +262,7 @@ mod set_exports {
 
 /// Note: this function doesn't know where the module was loaded from. it sets loaded_from to Implied
 /// by default, but the caller of this function should override this value.
-fn load_module_from_file_string(_conf: &mut HiraConfig, path: &str, module_string: String) -> Result<HiraModule, String> {
+fn load_module_from_file_string(conf: &mut HiraConfig, path: &str, module_string: String) -> Result<HiraModule, String> {
     let mut out = HiraModule::default();
     
     let module_file = match parse_file(&module_string) {
@@ -273,7 +286,7 @@ fn load_module_from_file_string(_conf: &mut HiraConfig, path: &str, module_strin
     );
     out.contents = contents;
 
-    let err_str = out.verify();
+    let err_str = out.verify(conf);
     if !err_str.is_empty() {
         return Err(err_str);
     }
@@ -443,5 +456,18 @@ mod tests {
         assert!(res.is_ok());
         let module = res.ok().unwrap();
         assert_eq!(module.name, "hello_world");
+    }
+
+    #[test]
+    fn cant_have_duplicate_modules() {
+        let code = r#"
+        const HIRA_MODULE_NAME: &'static str = "hello_world";
+        "#;
+        let mut conf = HiraConfig::default();
+        conf.loaded_modules.insert("hello_world".to_string(), Default::default());
+        let res = load_module_from_file_string(&mut conf, "a", code.to_string());
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        assert_eq!(err, "Duplicate module loading error. 'hello_world' already exists");
     }
 }
