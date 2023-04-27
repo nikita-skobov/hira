@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::{path::PathBuf, io::Write};
 use std::str::FromStr;
@@ -38,6 +38,7 @@ pub struct HiraConfig {
     pub wasm_directory: String,
     pub gen_directory: String,
 
+    pub known_cargo_dependencies: HashSet<String>,
     pub loaded_modules: HashMap<String, module_loading::HiraModule>,
 }
 
@@ -45,6 +46,7 @@ impl HiraConfig {
     fn new() -> Self {
         let mut out = Self::default();
         out.set_directories();
+        out.load_cargo_toml();
         out
     }
 
@@ -55,6 +57,25 @@ impl HiraConfig {
         self.modules_directory = format!("{}/{HIRA_MODULES_DIR_NAME}", self.hira_directory);
         self.wasm_directory = format!("{}/{HIRA_WASM_DIR_NAME}", self.hira_directory);
         self.gen_directory = format!("{}/{HIRA_GEN_DIR_NAME}", self.hira_directory);
+    }
+
+    fn load_cargo_toml(&mut self) {
+        let file_path = format!("{}/Cargo.toml", self.cargo_directory);
+        let cargo_file_str = if let Ok(file_str) = std::fs::read_to_string(file_path) {
+            file_str
+        } else {
+            return
+        };
+        let value = cargo_file_str.parse::<Table>().unwrap();
+        let mut dependencies = HashSet::new();        
+        if let Some(deps) = value.get("dependencies") {
+            if let toml::Value::Table(deps) = deps {
+                for (key, _) in deps {
+                    dependencies.insert(key.clone());
+                }
+            }
+        }
+        self.known_cargo_dependencies = dependencies;
     }
 }
 

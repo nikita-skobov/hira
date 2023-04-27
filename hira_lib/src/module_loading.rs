@@ -92,6 +92,12 @@ impl HiraModule {
             out = format!("Duplicate module loading error. '{}' already exists", self.name);
             return out;
         }
+        for req in &self.required_crates {
+            if !conf.known_cargo_dependencies.contains(req) {
+                out = format!("hira module '{}' depends on crate '{}'. Add this to your Cargo.toml file.", self.name, req);
+                return out;
+            }
+        }
         out
     }
 }
@@ -469,5 +475,30 @@ mod tests {
         assert!(res.is_err());
         let err = res.err().unwrap();
         assert_eq!(err, "Duplicate module loading error. 'hello_world' already exists");
+    }
+
+    #[test]
+    fn hira_can_warn_user_of_missing_crate() {
+        let code = r#"
+        const HIRA_MODULE_NAME: &'static str = "hello_world";
+        const REQUIRED_CRATES: &[&'static str] = &["tokio"];
+        "#;
+        let mut conf = HiraConfig::default();
+        let res = load_module_from_file_string(&mut conf, "a", code.to_string());
+        let err = res.err().unwrap();
+        assert_eq!(err, "hira module 'hello_world' depends on crate 'tokio'. Add this to your Cargo.toml file.");
+    }
+
+    #[test]
+    fn hira_can_store_required_modules() {
+        let code = r#"
+        const HIRA_MODULE_NAME: &'static str = "hello_world";
+        const REQUIRED_CRATES: &[&'static str] = &["tokio"];
+        "#;
+        let mut conf = HiraConfig::default();
+        conf.known_cargo_dependencies.insert("tokio".to_string());
+        let res = load_module_from_file_string(&mut conf, "a", code.to_string());
+        let module = res.ok().unwrap();
+        assert!(module.required_crates.contains(&"tokio".to_string()));
     }
 }
