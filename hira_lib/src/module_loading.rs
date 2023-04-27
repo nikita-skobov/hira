@@ -248,7 +248,11 @@ mod set_exports {
     }
     pub fn set_export_item_fn(module: &mut HiraModule, item: &syn::ItemFn) -> bool {
         if let syn::Visibility::Public(_) = item.vis {
-            module.export_items.insert(item.sig.ident.to_string(), item.to_token_stream().to_string());
+            let fn_name = item.sig.ident.to_string();
+            if fn_name == FN_ENTRYPOINT_NAME {
+                return true;
+            }
+            module.export_items.insert(fn_name, item.to_token_stream().to_string());
         }
         true
     }
@@ -500,5 +504,18 @@ mod tests {
         let res = load_module_from_file_string(&mut conf, "a", code.to_string());
         let module = res.ok().unwrap();
         assert!(module.required_crates.contains(&"tokio".to_string()));
+    }
+
+    #[test]
+    fn hira_doesnt_export_wasm_entrypoint() {
+        let code = r#"
+        const HIRA_MODULE_NAME: &'static str = "hello_world";
+        pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut CloudfrontInput)) -> CloudfrontInput {}
+        "#;
+        let mut conf = HiraConfig::default();
+        let res = load_module_from_file_string(&mut conf, "a", code.to_string());
+        let module = res.ok().unwrap();
+        assert!(module.entrypoint_fn.is_some());
+        assert!(!module.export_items.contains_key("wasm_entrypoint"));
     }
 }
