@@ -146,14 +146,26 @@ mod e2e_tests {
         user_code: &str,
         module_code: &str,
         conf_cb: impl Fn(&mut HiraConfig),
-    ) -> Result<TokenStream, TokenStream> {
+    ) -> Result<(HiraConfig, TokenStream), TokenStream> {
         let mut conf = HiraConfig::default();
         let (attr, item) = separate_item_and_attr_part(user_code);
         conf.wasm_directory = "./test_out".to_string();
         let module = load_module_from_file_string(&mut conf, "a", module_code.to_string()).expect("test case provided invalid module code");
         conf.loaded_modules.insert(module.name.clone(), module);
         conf_cb(&mut conf);
-        run_module_inner(&mut conf, item, attr)
+        let out = run_module_inner(&mut conf, item, attr)?;
+        Ok((conf, out))
+    }
+
+    fn e2e_module_run_reuse_config(
+        conf: &mut HiraConfig,
+        user_code: &str,
+        module_code: &str,
+    ) -> Result<TokenStream, TokenStream> {
+        let (attr, item) = separate_item_and_attr_part(user_code);
+        let module = load_module_from_file_string(conf, "a", module_code.to_string()).expect("test case provided invalid module code");
+        conf.loaded_modules.insert(module.name.clone(), module);
+        run_module_inner(conf, item, attr)
     }
 
     #[test]
@@ -179,7 +191,7 @@ mod e2e_tests {
             ),
             |_conf| {}
             );
-            let res = res.ok().unwrap();
+            let (_, res) = res.ok().unwrap();
             let res_str = res.to_string();
             assert_contains_str(res_str, "a is 2");
     }
@@ -203,9 +215,44 @@ mod e2e_tests {
             ),
             |_conf| {}
         );
-        let res = res.ok().unwrap();
+        let (_, res) = res.ok().unwrap();
         let res_str = res.to_string();
         assert_contains_str(&res_str, "renamed_from_wasm");
         assert_doesnt_contain_str(res_str, "hello");
+    }
+
+    #[test]
+    fn wasm_modules_can_store_and_read_shared_data() {
+        let res = e2e_module_run(
+            stringify!(
+                #[hira(|obj: &mut my_mod::Something| {})]
+                fn hello() {}
+            ),
+            stringify!(
+                const HIRA_MODULE_NAME: &'static str = "my_mod";
+                type ExportType = Something;
+                pub struct Something { pub a: u32 }
+                pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {
+                    obj.shared_state.insert("hello".to_string(), "world".to_string());
+                }
+            ),
+            |_conf| {}
+        );
+        let (mut conf, _) = res.ok().unwrap();
+        
+        let res = e2e_module_run_reuse_config(&mut conf,
+            stringify!(
+                #[hira(|obj: &mut my_mod2::Something| {})]
+                fn hello2() {}
+            ), stringify!(
+                const HIRA_MODULE_NAME: &'static str = "my_mod2";
+                type ExportType = Something;
+                pub struct Something { pub a: u32 }
+                pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {
+                    assert_eq!(obj.shared_state["hello"], "world");
+                }
+            )
+        );
+        let _ = res.ok().unwrap();
     }
 }
