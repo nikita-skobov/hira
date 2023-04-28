@@ -608,7 +608,7 @@ pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: To
     let item_name = input_type.get_name();
     let mut pass_this = LibraryObj::new();
     pass_this.user_data = (&input_type).into();
-    // pass_this.dependencies = get_known_dependencies(); // TODO
+    pass_this.dependencies = Vec::from_iter(conf.known_cargo_dependencies.clone());
     pass_this.shared_state = conf.shared_data.clone();
     pass_this.crate_name = std::env::var("CARGO_CRATE_NAME").unwrap_or("".into());
     let mut lib_obj = get_wasm_output(

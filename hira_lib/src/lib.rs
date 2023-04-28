@@ -249,7 +249,7 @@ mod e2e_tests {
                 conf.known_cargo_dependencies.insert("tokio".to_string());
             }
         );
-        let (_, res) = res.ok().unwrap();
+        let (_, _res) = res.ok().unwrap();
     }
 
     #[test]
