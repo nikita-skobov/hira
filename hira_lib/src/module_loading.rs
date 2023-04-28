@@ -672,19 +672,6 @@ pub fn load_modules_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<
     Ok(out)
 }
 
-pub fn do_something_with_module(_stream: TokenStream) -> TokenStream {
-    let mut out = default_stream();
-    let out_ref = &mut out;
-    use_hira_config(|conf| {
-        let thing = &conf.loaded_modules["todo"];
-        let text = &thing.contents;
-        *out_ref = quote! {
-            pub const something: &'static str = #text;
-        }
-    });
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
