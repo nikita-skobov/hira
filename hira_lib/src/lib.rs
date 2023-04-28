@@ -253,6 +253,31 @@ mod e2e_tests {
     }
 
     #[test]
+    fn wasm_modules_can_output_shared_file_data() {
+        let res = e2e_module_run(
+            stringify!(
+                #[hira(|obj: &mut my_mod::Something| {})]
+                fn hello() {}
+            ),
+            stringify!(
+                const HIRA_MODULE_NAME: &'static str = "my_mod";
+                type ExportType = Something;
+                pub struct Something { pub a: u32 }
+                pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {
+                    obj.append_to_file("hello.txt", "b", "line1".to_string());
+                    obj.append_to_file("hello.txt", "b", "line2".to_string());
+                    obj.append_to_file("hello.txt", "a", "line3".to_string());
+                    obj.append_to_file("hello.txt", "a", "line4".to_string());
+                }
+            ),
+            |_conf| {}
+        );
+        let (mut conf, _res) = res.ok().unwrap();
+        let data = conf.get_shared_file_data("hello.txt").expect("Failed to find hello.txt");
+        assert_eq!(data, "a\nline3\nline4\nb\nline1\nline2");
+    }
+
+    #[test]
     fn wasm_modules_can_store_and_read_shared_data() {
         let res = e2e_module_run(
             stringify!(
