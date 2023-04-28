@@ -609,7 +609,7 @@ pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: To
     let mut pass_this = LibraryObj::new();
     pass_this.user_data = (&input_type).into();
     // pass_this.dependencies = get_known_dependencies(); // TODO
-    // pass_this.shared_state = copy_shared_mem_data(); // TODO
+    pass_this.shared_state = conf.shared_data.clone();
     pass_this.crate_name = std::env::var("CARGO_CRATE_NAME").unwrap_or("".into());
     let mut lib_obj = get_wasm_output(
         Some(conf.wasm_directory.clone()),
@@ -643,6 +643,7 @@ pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: To
     //     }
     // }
 
+    conf.save_shared_data(std::mem::take(&mut lib_obj.shared_state));
     input_type.apply_library_obj_changes(lib_obj, &module_name);
     let item = input_type.back_to_stream(&format!("_b{hash}"));
 

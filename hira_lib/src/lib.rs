@@ -25,6 +25,7 @@ pub struct HiraConfig {
 
     pub known_cargo_dependencies: HashSet<String>,
     pub loaded_modules: HashMap<String, module_loading::HiraModule>,
+    pub shared_data: HashMap<String, String>,
 }
 
 impl HiraConfig {
@@ -33,6 +34,14 @@ impl HiraConfig {
         out.set_directories();
         out.load_cargo_toml();
         out
+    }
+
+    fn save_shared_data(&mut self, data: HashMap<String, String>) {
+        for (key, value) in data {
+            if !self.shared_data.contains_key(&key) {
+                self.shared_data.insert(key, value);
+            }
+        }
     }
 
     fn set_directories(&mut self) {
