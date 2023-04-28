@@ -114,6 +114,17 @@ mod e2e_tests {
         assert!(contains_true);
     }
 
+    fn assert_doesnt_contain_str<Q: AsRef<str>, S: AsRef<str>>(search: Q, contains: S) {
+        let search = search.as_ref();
+        let contains = contains.as_ref();
+        let contains_true = search.contains(contains);
+        if contains_true {
+            assert_eq!(format!("Didnt expected to find '{}'", contains), search);
+        }
+        // :shrug: why not
+        assert!(!contains_true);
+    }
+
     fn separate_item_and_attr_part(code: &str) -> (TokenStream, TokenStream) {
         let stream = TokenStream::from_str(code).expect("Failed to parse test case code as token stream");
         let mut item = syn::parse2::<ItemFn>(stream).expect("Failed to parse test case code");
@@ -171,5 +182,30 @@ mod e2e_tests {
             let res = res.ok().unwrap();
             let res_str = res.to_string();
             assert_contains_str(res_str, "a is 2");
+    }
+
+    #[test]
+    fn wasm_modules_can_read_and_edit_user_input_names() {
+        let res = e2e_module_run(
+            stringify!(
+                #[hira(|obj: &mut my_mod::Something| {})]
+                fn hello() {}
+            ),
+            stringify!(
+                const HIRA_MODULE_NAME: &'static str = "my_mod";
+                type ExportType = Something;
+                pub struct Something { pub a: u32 }
+                pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {
+                    let name = obj.user_data.get_name();
+                    assert_eq!(name, "hello");
+                    *name = "renamed_from_wasm".to_string();
+                }
+            ),
+            |_conf| {}
+        );
+        let res = res.ok().unwrap();
+        let res_str = res.to_string();
+        assert_contains_str(&res_str, "renamed_from_wasm");
+        assert_doesnt_contain_str(res_str, "hello");
     }
 }
