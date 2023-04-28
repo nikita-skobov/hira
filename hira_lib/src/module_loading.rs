@@ -3,9 +3,11 @@ use std::str::FromStr;
 
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident, ToTokens};
-use syn::parse_file;
+use syn::{parse_file, ItemUse};
 
 use crate::parsing::remove_surrounding_quotes;
+use crate::wasm_types::*;
+use wasm_type_gen::*;
 
 use super::HiraConfig;
 use super::parsing::{default_stream, compiler_error, iterate_file, iterate_expr_for_strings, get_list_of_strings};
@@ -76,7 +78,7 @@ impl HiraModule {
         };
         stream
     }
-    pub fn verify(&self, conf: &HiraConfig) -> String {
+    pub fn verify(&self, conf: &mut HiraConfig) -> String {
         let mut out = String::new();
         if self.name.is_empty() {
             out = format!("Failed to find `const {HIRA_MOD_NAME_NAME}`\nMust provide a hira module name");
@@ -96,6 +98,26 @@ impl HiraModule {
             if !conf.known_cargo_dependencies.contains(req) {
                 out = format!("hira module '{}' depends on crate '{}'. Add this to your Cargo.toml file.", self.name, req);
                 return out;
+            }
+        }
+        for req in &self.required_hira_modules {
+            if !conf.loaded_modules.contains_key(req) {
+                // if we haven't loaded this module yet, then go and try to load it.
+                // TODO: eventually we want to convert req from
+                // module_name -> module:name:
+                // ie: make it the remote format.. we wish to only support remote formats for
+                // requiring loaded modules. and then remote module lookups will first
+                // try to look up the module from disk (ie: implied name).
+                // however, for now we just try to look it up as if it's an implied name
+                // so we keep the name as is:
+                let module = match load_module(conf, req.clone()) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        out = e;
+                        return out;
+                    }
+                };
+                conf.loaded_modules.insert(module.name.clone(), module);
             }
         }
         out
@@ -165,14 +187,47 @@ fn set_module_name(module: &mut HiraModule, item: &syn::ItemConst) -> bool {
     true
 }
 
-fn set_required_hira_mods(module: &mut HiraModule, item: &syn::ItemConst) -> bool {
-    if item.ident.to_string() != REQUIRED_HIRA_MODS_NAME {
-        return true;
+fn fill_hira_mods(use_item: &syn::UseTree, hira_mods: &mut Vec<String>) -> String {
+    let mut out = String::new();
+    match &use_item {
+        syn::UseTree::Name(n) => {
+            let mut name = n.ident.to_string();
+            remove_surrounding_quotes(&mut name);
+            // require single underscore to be a hira module:
+            let num_sections = name.split("_").into_iter().count();
+            if num_sections == 2 {
+                hira_mods.push(name);
+            }
+        }
+        syn::UseTree::Group(g) => {
+            for item in &g.items {
+                let out = fill_hira_mods(item, hira_mods);
+                if !out.is_empty() {
+                    return out;
+                }
+            }
+        }
+        x => {
+            let x_str = x.to_token_stream().to_string().replace(" ", "");
+            out = format!("Unsupported module use statement 'use {x_str}'.\nhira only supports use statements such as\n`use specific_module;`\nOr:\n`use {{\n  module_one,\n  module_two\n}}`");
+            return out;
+        }
     }
-    iterate_expr_for_strings(&*item.expr, |a| {
-        module.required_hira_modules.push(a);
-    });
-    true
+    out
+}
+
+fn set_required_hira_mods(module: &mut HiraModule, item: &syn::ItemUse) -> bool {
+    let mut hira_mods = vec![];
+    // during compilation of a whole file, we're ignoring the requirements somewhat
+    // so we can ignore any errors while parsing this section.
+    // any other errors due to invalid imports will be exposed during compilation.
+    let _ = fill_hira_mods(&item.tree, &mut hira_mods);
+    for m in hira_mods {
+        module.required_hira_modules.push(m);
+    }
+    // we never want to let use:X statements
+    // make it into the compilation, because these wont work.
+    false
 }
 
 fn set_primary_export_item(module: &mut HiraModule, item: &syn::ItemType) -> bool {
@@ -285,7 +340,7 @@ fn load_module_from_file_string(conf: &mut HiraConfig, path: &str, module_string
     let contents = iterate_file(
         &mut out, module_file,
         &[set_entrypoint_fn, set_exports::set_export_item_fn],
-        &[set_required_crates, set_required_hira_mods, set_exports::set_export_item_const, set_module_name],
+        &[set_required_crates, set_exports::set_export_item_const, set_module_name],
         &[set_primary_export_item, set_exports::set_export_item_type],
         &[set_exports::set_export_item_enum],
         &[set_exports::set_export_item_mod, remove_recursive_hira_macro],
@@ -293,6 +348,7 @@ fn load_module_from_file_string(conf: &mut HiraConfig, path: &str, module_string
         &[set_exports::set_export_item_struct],
         &[set_exports::set_export_item_trait],
         &[set_exports::set_export_item_union],
+        &[set_required_hira_mods],
     );
     out.contents = contents;
 
@@ -398,6 +454,95 @@ pub fn load_modules(mut stream: TokenStream) -> TokenStream {
         }
         Err(e) => e,
     }
+}
+
+/// corresponds to the main hira! macro
+pub fn run_module(mut stream: TokenStream, mut attr: TokenStream) -> TokenStream {
+    let mut out = Err(default_stream());
+    let out_ref = &mut out;
+    use_hira_config(|conf| {
+        let stream = std::mem::take(&mut stream);
+        let attr = std::mem::take(&mut attr);
+        *out_ref = run_module_inner(conf, stream, attr);
+    });
+    match out {
+        Ok(list) => list,
+        Err(e) => e,
+    }
+}
+
+fn load_hira_dependencies_from_stream(stream: TokenStream) -> Result<Vec<String>, String> {
+    let item_use = if let Ok(x) = syn::parse2::<ItemUse>(stream) {
+        x
+    } else {
+        return Ok(vec![])
+    };
+    let mut hira_mods = vec![];
+    let out = fill_hira_mods(&item_use.tree, &mut hira_mods);
+    if out.is_empty() {
+        Ok(hira_mods)
+    } else {
+        Err(out)
+    }
+}
+
+/// this function corresponds to when a hira module writer wants type hints in their module.
+/// they will add a line like `#[hira::hira] use { dependencies ... }`
+/// to insert the library object data + dependencies into their code.
+pub fn run_module_include_only(conf: &mut HiraConfig, stream: TokenStream) -> Result<TokenStream, TokenStream> {
+    // try to parse the item stream as a use statement
+    let required_mods = match load_hira_dependencies_from_stream(stream) {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(compiler_error(&e));
+        }
+    };
+
+    let mut extra_mod_defs = vec![];
+    for required_mod in required_mods {
+        // TODO: currently the mod name "path" is in implied name format
+        // ie: module_name, so the behavior will be to only search for it in
+        // the modules/ directory. should change this to be a remote name format
+        // such that load_modules will try to look for it either
+        // online or in the modules/ directory
+        let module = match load_module(conf, required_mod) {
+            Ok(o) => o,
+            Err(e) => {
+                return Err(compiler_error(&e));
+            }
+        };
+        extra_mod_defs.push(module.to_token_stream());
+    }
+
+    let mut include_str = LibraryObj::include_in_rs_wasm();
+    include_str.push_str(user_data_impl());
+    include_str.push_str(lib_obj_impl());
+    let include_tokens = proc_macro2::TokenStream::from_str(&include_str).unwrap_or_default();
+    let parsing_tokens = proc_macro2::TokenStream::from_str(WASM_PARSING_TRAIT_STR).unwrap_or_default();
+    let out = quote! {
+        #parsing_tokens
+
+        #(#extra_mod_defs)*
+
+        #include_tokens
+    };
+    return Ok(TokenStream::from(out));
+}
+
+pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, attr: TokenStream) -> Result<TokenStream, TokenStream> {
+    // this is a hack to allow people who write wasm_modules easy type hints.
+    // if we detect no attributes, then we just output all of the types that
+    // wasm module writers depend on, like UserData, and LibraryObj
+    if attr.is_empty() {
+        return run_module_include_only(conf, stream);
+    }
+    // otherwise, it's a normal module macro, ie a `#[hira(|callback| { ... })]`
+    // so:
+    // 1. ensure the required module in the callback exists.
+    // 2. output the users callback so they get typehints
+    // 3. run+compile the wasm
+    // 4. change the outputs according to the wasm library object result
+    todo!()
 }
 
 pub fn load_modules_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<Vec<TokenStream>, TokenStream> {

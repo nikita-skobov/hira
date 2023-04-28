@@ -21,7 +21,7 @@ use syn::{
     ItemStruct,
     ItemTrait,
     ItemUnion,
-    Expr
+    Expr, ItemUse
 };
 
 use crate::module_loading::HiraModule;
@@ -90,6 +90,7 @@ pub fn iterate_file(
     struct_callbacks: &[fn(&mut HiraModule, &ItemStruct) -> bool],
     trait_callbacks: &[fn(&mut HiraModule, &ItemTrait) -> bool],
     union_callbacks: &[fn(&mut HiraModule, &ItemUnion) -> bool],
+    use_callbacks: &[fn(&mut HiraModule, &ItemUse) -> bool],
 ) -> String {
     let mut out = "".to_string();
     for item in file.items.iter() {
@@ -104,6 +105,13 @@ pub fn iterate_file(
             }
             Item::Const(x) => {
                 for cb in const_callbacks {
+                    if !cb(module, x) {
+                        is_filtered = true;
+                    }
+                }
+            }
+            Item::Use(x) => {
+                for cb in use_callbacks {
                     if !cb(module, x) {
                         is_filtered = true;
                     }
