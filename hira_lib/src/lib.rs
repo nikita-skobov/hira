@@ -231,6 +231,28 @@ mod e2e_tests {
     }
 
     #[test]
+    fn wasm_modules_have_access_to_known_cargo_dependencies() {
+        let res = e2e_module_run(
+            stringify!(
+                #[hira(|obj: &mut my_mod::Something| {})]
+                fn hello() {}
+            ),
+            stringify!(
+                const HIRA_MODULE_NAME: &'static str = "my_mod";
+                type ExportType = Something;
+                pub struct Something { pub a: u32 }
+                pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {
+                    assert_eq!(obj.dependencies[0], "tokio");
+                }
+            ),
+            |conf| {
+                conf.known_cargo_dependencies.insert("tokio".to_string());
+            }
+        );
+        let (_, res) = res.ok().unwrap();
+    }
+
+    #[test]
     fn wasm_modules_can_store_and_read_shared_data() {
         let res = e2e_module_run(
             stringify!(
