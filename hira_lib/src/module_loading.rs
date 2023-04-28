@@ -120,6 +120,14 @@ impl HiraModule {
                 conf.loaded_modules.insert(module.name.clone(), module);
             }
         }
+        if self.primary_export_item.is_empty() {
+            out = format!("hira module '{}' is missing a primary export item. Expected to find `type {} = Something`", self.name, EXPORT_ITEM_NAME);
+            return out;
+        }
+        if self.entrypoint_fn.is_none() {
+            out = format!("hira module '{}' is missing an entrypoint function. Expected entrypoint function something like `pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut {}))`", self.name, self.primary_export_item);
+            return out;
+        }
         out
     }
 }
@@ -583,16 +591,20 @@ mod tests {
         let code = r#"
         #[hira::hira] mod _typehints {}
         const HIRA_MODULE_NAME: &'static str = "a_b";
+        type ExportType = Something;
+        pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {}
         "#;
         let mut conf = HiraConfig::default();
         let res = load_module_from_file_string(&mut conf, "a", code.to_string()).unwrap();
-        assert_eq!(res.contents, "const HIRA_MODULE_NAME : & 'static str = \"a_b\" ;\n");
+        assert_eq!(res.contents, "const HIRA_MODULE_NAME : & 'static str = \"a_b\" ;\ntype ExportType = Something ;\npub fn wasm_entrypoint (obj : & mut LibraryObj , cb : fn (& mut Something)) { }\n");
     }
 
     #[test]
     fn fails_if_module_name_not_provided() {
         let code = r#"
         const HIRA_MODULE_NAME_WRONG: &'static str = "aaa";
+        type ExportType = Something;
+        pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {}
         "#;
         let mut conf = HiraConfig::default();
         let res = load_module_from_file_string(&mut conf, "a", code.to_string());
@@ -605,6 +617,8 @@ mod tests {
     fn can_load_module_name() {
         let code = r#"
         const HIRA_MODULE_NAME: &'static str = "hello_world";
+        type ExportType = Something;
+        pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {}
         "#;
         let mut conf = HiraConfig::default();
         let res = load_module_from_file_string(&mut conf, "a", code.to_string());
@@ -617,6 +631,8 @@ mod tests {
     fn cant_have_duplicate_modules() {
         let code = r#"
         const HIRA_MODULE_NAME: &'static str = "hello_world";
+        type ExportType = Something;
+        pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {}
         "#;
         let mut conf = HiraConfig::default();
         conf.loaded_modules.insert("hello_world".to_string(), Default::default());
@@ -631,6 +647,8 @@ mod tests {
         let code = r#"
         const HIRA_MODULE_NAME: &'static str = "hello_world";
         const REQUIRED_CRATES: &[&'static str] = &["tokio"];
+        type ExportType = Something;
+        pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {}
         "#;
         let mut conf = HiraConfig::default();
         let res = load_module_from_file_string(&mut conf, "a", code.to_string());
@@ -643,6 +661,8 @@ mod tests {
         let code = r#"
         const HIRA_MODULE_NAME: &'static str = "hello_world";
         const REQUIRED_CRATES: &[&'static str] = &["tokio"];
+        type ExportType = Something;
+        pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {}
         "#;
         let mut conf = HiraConfig::default();
         conf.known_cargo_dependencies.insert("tokio".to_string());
@@ -655,6 +675,7 @@ mod tests {
     fn hira_doesnt_export_wasm_entrypoint() {
         let code = r#"
         const HIRA_MODULE_NAME: &'static str = "hello_world";
+        type ExportType = CloudfrontInput;
         pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut CloudfrontInput)) -> CloudfrontInput {}
         "#;
         let mut conf = HiraConfig::default();
