@@ -23,6 +23,7 @@ use wasm_type_gen::*;
 
 pub mod parsing;
 pub mod module_loading;
+pub mod wasm_types;
 
 pub const HIRA_DIR_NAME: &'static str = "hira";
 pub const HIRA_WASM_DIR_NAME: &'static str = "wasm_out";
