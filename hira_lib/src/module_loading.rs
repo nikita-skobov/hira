@@ -336,7 +336,7 @@ mod set_exports {
 
 /// Note: this function doesn't know where the module was loaded from. it sets loaded_from to Implied
 /// by default, but the caller of this function should override this value.
-fn load_module_from_file_string(conf: &mut HiraConfig, path: &str, module_string: String) -> Result<HiraModule, String> {
+pub fn load_module_from_file_string(conf: &mut HiraConfig, path: &str, module_string: String) -> Result<HiraModule, String> {
     let mut out = HiraModule::default();
     
     let module_file = match parse_file(&module_string) {
@@ -693,17 +693,6 @@ pub fn do_something_with_module(_stream: TokenStream) -> TokenStream {
 mod tests {
     use super::*;
 
-    fn assert_contains_str<Q: AsRef<str>, S: AsRef<str>>(search: Q, contains: S) {
-        let search = search.as_ref();
-        let contains = contains.as_ref();
-        let contains_true = search.contains(contains);
-        if !contains_true {
-            assert_eq!(format!("Expected to find '{}'", contains), search);
-        }
-        // :shrug: why not
-        assert!(contains_true);
-    }
-
     #[test]
     fn can_remove_recursive_macro() {
         let code = r#"
@@ -801,37 +790,5 @@ mod tests {
         let module = res.ok().unwrap();
         assert!(module.entrypoint_fn.is_some());
         assert!(!module.export_items.contains_key("wasm_entrypoint"));
-    }
-
-    #[test]
-    fn wasm_evaluation_works() {
-        let code_attr = r#"
-        |obj: &mut my_mod::Something| {
-            obj.a = 2;
-        }"#;
-        let code_item = r#"
-            fn hello() {}
-        "#;
-        let mut conf = HiraConfig::default();
-        conf.wasm_directory = "./test_out".to_string();
-        let mut module = HiraModule::default();
-        module.name = "my_mod".to_string();
-        module.primary_export_item = "Something".to_string();
-        module.contents = r#"
-        pub struct Something { pub a: u32 }
-        pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {
-            let mut something = Something { a: 1 };
-            cb(&mut something);
-            if something.a == 2 {
-                obj.compile_error("a is 2");
-            }
-        }
-        "#.to_string();
-        conf.loaded_modules.insert(module.name.clone(), module);
-        let item = TokenStream::from_str(code_item).unwrap();
-        let attr = TokenStream::from_str(code_attr).unwrap();
-        let res = run_module_inner(&mut conf, item, attr).unwrap();
-        let res_str = res.to_string();
-        assert_contains_str(res_str, "a is 2");
     }
 }

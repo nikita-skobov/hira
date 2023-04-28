@@ -93,3 +93,83 @@ pub fn use_hira_config(mut cb: impl FnMut(&mut HiraConfig)) {
         }
     }
 }
+
+#[cfg(test)]
+mod e2e_tests {
+    use std::str::FromStr;
+    use proc_macro2::TokenStream;
+    use quote::ToTokens;
+    use syn::ItemFn;
+    use crate::module_loading::{run_module_inner, load_module_from_file_string};
+    use super::*;
+
+    fn assert_contains_str<Q: AsRef<str>, S: AsRef<str>>(search: Q, contains: S) {
+        let search = search.as_ref();
+        let contains = contains.as_ref();
+        let contains_true = search.contains(contains);
+        if !contains_true {
+            assert_eq!(format!("Expected to find '{}'", contains), search);
+        }
+        // :shrug: why not
+        assert!(contains_true);
+    }
+
+    fn separate_item_and_attr_part(code: &str) -> (TokenStream, TokenStream) {
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case code as token stream");
+        let mut item = syn::parse2::<ItemFn>(stream).expect("Failed to parse test case code");
+        let mut attr_stream = TokenStream::new();
+        for a in item.attrs.drain(..) {
+            match a.meta {
+                syn::Meta::Path(_) => todo!(),
+                syn::Meta::List(a) => {
+                    attr_stream.extend([a.tokens]);
+                }
+                syn::Meta::NameValue(_) => todo!(),
+            }
+        }
+        let item_stream = item.to_token_stream();
+        (attr_stream, item_stream)
+    }
+
+    fn e2e_module_run(
+        user_code: &str,
+        module_code: &str,
+        conf_cb: impl Fn(&mut HiraConfig),
+    ) -> Result<TokenStream, TokenStream> {
+        let mut conf = HiraConfig::default();
+        let (attr, item) = separate_item_and_attr_part(user_code);
+        conf.wasm_directory = "./test_out".to_string();
+        let module = load_module_from_file_string(&mut conf, "a", module_code.to_string()).expect("test case provided invalid module code");
+        conf.loaded_modules.insert(module.name.clone(), module);
+        conf_cb(&mut conf);
+        run_module_inner(&mut conf, item, attr)
+    }
+
+    #[test]
+    fn wasm_evaluation_works() {
+        let res = e2e_module_run(
+            stringify!(
+                #[hira(|obj: &mut my_mod::Something| {
+                    obj.a = 2;
+                })]
+                fn hello() {}
+            ),
+            stringify!(
+                const HIRA_MODULE_NAME: &'static str = "my_mod";
+                type ExportType = Something;
+                pub struct Something { pub a: u32 }
+                pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {
+                    let mut something = Something { a: 1 };
+                    cb(&mut something);
+                    if something.a == 2 {
+                        obj.compile_error("a is 2");
+                    }
+                }
+            ),
+            |_conf| {}
+            );
+            let res = res.ok().unwrap();
+            let res_str = res.to_string();
+            assert_contains_str(res_str, "a is 2");
+    }
+}
