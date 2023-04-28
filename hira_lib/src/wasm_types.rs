@@ -36,6 +36,7 @@ impl Default for UserData {
     }
 }
 
+#[derive(Debug)]
 pub struct MapEntry<T> {
     pub key: String,
     pub lines: Vec<T>,
@@ -220,14 +221,6 @@ pub fn get_input_type(item: proc_macro2::TokenStream) -> Option<InputType> {
         return Some(InputType::Module(input));
     }
     None
-}
-
-
-impl LibraryObj {
-    pub fn handle_file_ops(&mut self, _wasm_module_name: &str, _user_type_name: &str) -> Result<(), String> {
-        // output_shared_files(wasm_module_name, to_map_entry(std::mem::take(&mut self.shared_output_data)))
-        todo!()
-    }
 }
 
 impl From<&InputType> for UserData {

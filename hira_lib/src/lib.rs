@@ -1,13 +1,16 @@
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::sync::Mutex;
 use module_loading::HiraModule;
 use toml::Table;
+use wasm_types::{MapEntry, LibraryObj};
 
 pub mod parsing;
 pub mod module_loading;
 pub mod wasm_types;
 
 use crate::module_loading::load_module;
+use crate::wasm_types::to_map_entry;
 
 pub const HIRA_DIR_NAME: &'static str = "hira";
 pub const HIRA_WASM_DIR_NAME: &'static str = "wasm_out";
@@ -23,9 +26,11 @@ pub struct HiraConfig {
     pub wasm_directory: String,
     pub gen_directory: String,
 
+    pub should_do_file_ops: bool,
     pub known_cargo_dependencies: HashSet<String>,
     pub loaded_modules: HashMap<String, module_loading::HiraModule>,
     pub shared_data: HashMap<String, String>,
+    pub shared_file_data: Vec<MapEntry<MapEntry<String>>>,
 }
 
 impl HiraConfig {
@@ -33,7 +38,164 @@ impl HiraConfig {
         let mut out = Self::default();
         out.set_directories();
         out.load_cargo_toml();
+        out.set_should_do_file_ops();
         out
+    }
+
+    fn set_should_do_file_ops(&mut self) {
+        // through manual testing i've found that running cargo build uses RUST_BACKTRACE full
+        // whereas the cargo command used by IDEs sets this to short. basically: dont output command
+        // files every keystroke.. instead we only wish to do this when the user actually builds.
+        let mut should_do = false;
+        if let Ok(env) = std::env::var("RUST_BACKTRACE") {
+            if env == "full" {
+                should_do = true;
+            }
+        }
+        // check for optional env vars set by users:
+        if let Ok(env) = std::env::var("CARGO_WASMTYPEGEN_FILEOPS") {
+            if env == "false" || env == "0" {
+                should_do = false;
+            } else if env == "true" || env == "1" {
+                should_do = true;
+            }
+        }
+        self.should_do_file_ops = should_do;
+    }
+
+    fn merge_shared_files(
+        &mut self,
+        wasm_module_name: &str,
+        data: Vec<MapEntry<MapEntry<(bool, String, Option<String>)>>>
+    ) -> Result<(), String> {
+        // merge the current data with the previous data
+        for entry in data {
+            let file_name = entry.key;
+            // this is how we enforce that shared files only get output
+            // to the shared directory. basically: it can only be a file name, not a path.
+            if file_name.contains("/") || file_name.contains("\\") {
+                return Err(format!("Wasm module '{wasm_module_name}' attempted to output a shared file outside the shared file directory {:?}", file_name));
+            }
+            for file_data in entry.lines {
+                let label = file_data.key;
+
+                let label_entry = if let Some(e) = self.shared_file_data.iter_mut().find(|x| x.key == file_name) {
+                    if let Some(l) = e.lines.iter_mut().find(|x| x.key == label) {
+                        l
+                    } else {
+                        let index = e.lines.len();
+                        e.lines.push(MapEntry { key: label.clone(), lines: vec![] });
+                        &mut e.lines[index]
+                    }
+                } else {
+                    let index = self.shared_file_data.len();
+                    self.shared_file_data.push(MapEntry { key: file_name.clone(), lines: vec![MapEntry { key: label.clone(), lines: vec![] }] });
+                    &mut self.shared_file_data[index].lines[0]
+                };
+
+                for (unique, line, after) in file_data.lines {
+                    if unique {
+                        if !label_entry.lines.contains(&line) {
+                            label_entry.lines.push(line);
+                        }
+                        continue;
+                    }
+                    // if after is provided, then treat 'line' as a search string, and
+                    // try to insert the after portion immediately after the search string.
+                    // if not found, output a newline concatenation of line+after
+                    if let Some(after) = after {
+                        let found_str = label_entry.lines.iter_mut()
+                            .find_map(|l| l.find(&line).map(|index| (l, index + line.len())));
+                        if let Some((found_str, index)) = found_str {
+                            // found, now insert the after portion at the index
+                            found_str.insert_str(index, &after);
+                        } else {
+                            // not found, just concatenate and output
+                            label_entry.lines.push(format!("{line}{after}"));
+                        }
+                        continue;
+                    }
+                    // otherwise, its just a normal line entry
+                    label_entry.lines.push(line);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn iterate_map_entry(
+        file_entry: &mut MapEntry<MapEntry<String>>,
+        mut cb: impl FnMut(&str) -> Result<(), String>
+    ) -> Result<(), String> {
+        // sort the labels alphabetically
+        file_entry.lines.sort_by(|a, b| a.key.cmp(&b.key));
+
+        for label_entry in file_entry.lines.iter() {
+            let label = &label_entry.key;
+            cb(label)?;
+            cb("\n")?;
+            for line in label_entry.lines.iter() {
+                cb(line)?;
+                cb("\n")?;
+            }
+        }
+        Ok(())
+    }
+
+    // this is a test utility to verify file operations happen correctly
+    // without needing to write out to disk
+    #[allow(dead_code)]
+    #[cfg(debug_assertions)]
+    fn get_shared_file_data(&mut self, name: &str) -> Option<String> {
+        let entry = self.shared_file_data.iter_mut()
+            .find(|x| x.key == name)?;
+        let mut out = "".to_string();
+        let _ = Self::iterate_map_entry(entry, |s| {
+            out.push_str(s);
+            Ok(())
+        });
+        Some(out)
+    }
+
+    fn output_shared_files(
+        &mut self,
+        wasm_module_name: &str,
+        data: Vec<MapEntry<MapEntry<(bool, String, Option<String>)>>>
+    ) -> Result<(), String> {
+        // set the wasm_module's data into the global shared data object.
+        self.merge_shared_files(wasm_module_name, data)?;
+        // we only wish to actually write to disk if this is a real build
+        // (or if user explicitly enabled it via CARGO_WASMTYPEGEN_FILEOPS=1)
+        if !self.should_do_file_ops {
+            return Ok(());
+        }
+
+        // create dir if it doesnt exist yet
+        let shared_dir = &self.gen_directory;
+        let _ = std::fs::create_dir(&shared_dir);
+        // iterate the shared data object and output to the shared file(s)
+        for file_entry in self.shared_file_data.iter_mut() {
+            let file_name = &file_entry.key;
+            let file_path = format!("{shared_dir}/{file_name}");
+            let mut out_f = std::fs::File::create(&file_path)
+                .map_err(|e| format!("Failed to create/open file while running module '{wasm_module_name}' {:?}\nError:\n{:?}", file_path, e))?;
+
+            Self::iterate_map_entry(file_entry, |s| {
+                out_f.write_all(s.as_bytes())
+                    .map_err(|e| format!("Failed to write to file while running module '{wasm_module_name}' {:?}\nError:\n{:?}", file_path, e))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    fn do_file_ops(
+        &mut self,
+        module_name: &str,
+        lib_obj: &mut LibraryObj,
+    ) -> Result<(), String> {
+        let map_entry_data = to_map_entry(std::mem::take(&mut lib_obj.shared_output_data));
+        self.output_shared_files(module_name, map_entry_data)
     }
 
     fn save_shared_data(&mut self, data: HashMap<String, String>) {
@@ -274,7 +436,7 @@ mod e2e_tests {
         );
         let (mut conf, _res) = res.ok().unwrap();
         let data = conf.get_shared_file_data("hello.txt").expect("Failed to find hello.txt");
-        assert_eq!(data, "a\nline3\nline4\nb\nline1\nline2");
+        assert_eq!(data, "a\nline3\nline4\nb\nline1\nline2\n");
     }
 
     #[test]

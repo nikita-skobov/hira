@@ -635,14 +635,9 @@ pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: To
         add_after.push(tokens);
     }
 
-    // TODO:
-    // save_shared_mem_data(std::mem::take(&mut lib_obj.shared_state));
-    // if should_output_command_files {
-    //     if let Err(e) = lib_obj.handle_file_ops(module_name, &item_name) {
-    //         panic!("{}", e);
-    //     }
-    // }
-
+    conf.do_file_ops(&module_name, &mut lib_obj).map_err(|e| {
+        compiler_error(&e)
+    })?;
     conf.save_shared_data(std::mem::take(&mut lib_obj.shared_state));
     input_type.apply_library_obj_changes(lib_obj, &module_name);
     let item = input_type.back_to_stream(&format!("_b{hash}"));
