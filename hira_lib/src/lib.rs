@@ -1,29 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
-use std::{path::PathBuf, io::Write};
-use std::str::FromStr;
-use syn::Item;
+use module_loading::HiraModule;
 use toml::Table;
-
-use proc_macro2::{Ident, TokenStream};
-use syn::{
-    Type,
-    parse_file,
-    ItemFn,
-    ItemStruct,
-    ItemStatic,
-    ItemConst,
-    ItemMod,
-    Visibility,
-    token::Pub,
-    ExprMatch,
-};
-use quote::{quote, format_ident, ToTokens};
-use wasm_type_gen::*;
 
 pub mod parsing;
 pub mod module_loading;
 pub mod wasm_types;
+
+use crate::module_loading::load_module;
 
 pub const HIRA_DIR_NAME: &'static str = "hira";
 pub const HIRA_WASM_DIR_NAME: &'static str = "wasm_out";
@@ -58,6 +42,21 @@ impl HiraConfig {
         self.modules_directory = format!("{}/{HIRA_MODULES_DIR_NAME}", self.hira_directory);
         self.wasm_directory = format!("{}/{HIRA_WASM_DIR_NAME}", self.hira_directory);
         self.gen_directory = format!("{}/{HIRA_GEN_DIR_NAME}", self.hira_directory);
+    }
+
+    pub fn get_module(&mut self, module_name: &str) -> Result<&HiraModule, String> {
+        let split_count = module_name.split("_").into_iter().count();
+        if split_count != 2 {
+            return Err(format!("{:?} is not a valid module name. Module names must have 1 underscore separating a namespace and a name", module_name));
+        }
+        if !self.loaded_modules.contains_key(module_name) {
+            let x = load_module(self, module_name.to_string())?;
+            self.loaded_modules.insert(x.name.clone(), x);
+        }
+        if let Some(m) = self.loaded_modules.get(module_name) {
+            return Ok(m);
+        }
+        Err(format!("Failed to resolve module '{}' even after loading...", module_name))
     }
 
     fn load_cargo_toml(&mut self) {

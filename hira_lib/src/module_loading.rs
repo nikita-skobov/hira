@@ -5,7 +5,7 @@ use proc_macro2::TokenStream;
 use quote::{quote, format_ident, ToTokens};
 use syn::{parse_file, ItemUse};
 
-use crate::parsing::remove_surrounding_quotes;
+use crate::parsing::{remove_surrounding_quotes, get_input_type, parse_callback_required_module};
 use crate::wasm_types::*;
 use wasm_type_gen::*;
 
@@ -18,6 +18,7 @@ pub const LIB_OBJ_TYPE_NAME: &'static str = "LibraryObj";
 pub const REQUIRED_CRATES_NAME: &'static str = "REQUIRED_CRATES";
 pub const REQUIRED_HIRA_MODS_NAME: &'static str = "REQUIRED_HIRA_MODULES";
 pub const HIRA_MOD_NAME_NAME: &'static str = "HIRA_MODULE_NAME";
+pub const EXPORT_ITEM_NAME: &'static str = "ExportType";
 
 #[derive(Debug)]
 pub enum LoadedFrom {
@@ -239,7 +240,7 @@ fn set_required_hira_mods(module: &mut HiraModule, item: &syn::ItemUse) -> bool 
 }
 
 fn set_primary_export_item(module: &mut HiraModule, item: &syn::ItemType) -> bool {
-    if item.ident.to_string() != "ExportType" {
+    if item.ident.to_string() != EXPORT_ITEM_NAME {
         return true;
     }
 
@@ -408,7 +409,7 @@ fn load_module_implied_file(conf: &mut HiraConfig, path: String) -> Result<HiraM
 /// - if its none of the above, we check if its a module name. these don't contain
 ///   any / at all, and can optionally end with the rust file extension .rs
 ///   if we find this, then we assume it's in the hira/modules directory.
-fn load_module(conf: &mut HiraConfig, path: String) -> Result<HiraModule, String> {
+pub fn load_module(conf: &mut HiraConfig, path: String) -> Result<HiraModule, String> {
     let is_absolute = path.starts_with("/");
     let is_namespace_modname_format = path.ends_with(":") && path.match_indices(":").collect::<Vec<_>>().len() == 2;
     let is_remote = path.starts_with("http://") || path.starts_with("https://") || is_namespace_modname_format;
@@ -474,7 +475,7 @@ pub fn run_module(mut stream: TokenStream, mut attr: TokenStream) -> TokenStream
         *out_ref = run_module_inner(conf, stream, attr);
     });
     match out {
-        Ok(list) => list,
+        Ok(o) => o,
         Err(e) => e,
     }
 }
@@ -537,7 +538,33 @@ pub fn run_module_include_only(conf: &mut HiraConfig, stream: TokenStream) -> Re
     return Ok(TokenStream::from(out));
 }
 
-pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, attr: TokenStream) -> Result<TokenStream, TokenStream> {
+pub fn run_module_validate_user_input(
+    stream: TokenStream, attr: &TokenStream
+) -> Result<(InputType, String, u32), TokenStream> {
+    let item_str = stream.to_string();
+    let attr_str = attr.to_string();
+    let combined = format!("{item_str}{attr_str}");
+    let hash = adler32::adler32(combined.as_bytes()).unwrap_or(0);
+
+    let input_type = get_input_type(stream);
+    // verify the input is something that we support. currently:
+    // - entire functions, signature + body.
+    // - derive input, ie: struct defs, enums.
+    let input_type = if let Some(input) = input_type {
+        input
+    } else {
+        return Err(compiler_error("hira was applied to an item that we currently do not support parsing. Currently only supports functions and deriveInputs"));
+    };
+
+    let depends_on_module = match parse_callback_required_module(attr_str) {
+        Ok(m) => m,
+        Err(e) => return Err(compiler_error(&e)),
+    };
+
+    Ok((input_type, depends_on_module, hash))
+}
+
+pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: TokenStream) -> Result<TokenStream, TokenStream> {
     // this is a hack to allow people who write wasm_modules easy type hints.
     // if we detect no attributes, then we just output all of the types that
     // wasm module writers depend on, like UserData, and LibraryObj
@@ -546,11 +573,91 @@ pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, attr: TokenS
     }
     // otherwise, it's a normal module macro, ie a `#[hira(|callback| { ... })]`
     // so:
-    // 1. ensure the required module in the callback exists.
+    // 1. validate the user's input:
+    //    a. ensure the required module in the callback exists.
+    //    b. ensure the user's input stream is valid (ie: function, struct, module, etc.)
+    //    c. extract/create necessary hashes/item identifiers for following steps
     // 2. output the users callback so they get typehints
     // 3. run+compile the wasm
     // 4. change the outputs according to the wasm library object result
-    todo!()
+
+    let (mut input_type, module_name, hash) = run_module_validate_user_input(stream.clone(), &attr)?;
+
+    // need to get the module once and clone its required crates
+    // and then get the module again after loading all of its requirements...
+    // should be a fast operation once the modules are loaded though
+    let requirements = {
+        let module = conf.get_module(&module_name).map_err(|e| compiler_error(&e))?;
+        module.required_crates.clone()
+    };
+    let mut extra_mod_defs = vec![];
+    for req in requirements {
+        let req_module = conf.get_module(&req).map_err(|e| compiler_error(&format!("Failed to load required module for '{}'\n{:?}", module_name, e)))?;
+        extra_mod_defs.push(req_module.to_token_stream());
+    }
+    let module = conf.get_module(&module_name).map_err(|e| compiler_error(&e))?;
+
+    // form the code that we will actually compile:
+    let parsed_wasm_code = parse_file(&module.contents).map_err(|e| {
+        compiler_error(&format!("Failed to parse '{}' as valid rust code. Error:\n{:?}", module.name, e))
+    })?;
+    let (code, add_to_code) = get_wasm_code_to_compile(
+        &module_name, &module.primary_export_item, &attr, parsed_wasm_code, extra_mod_defs
+    );
+
+    let item_name = input_type.get_name();
+    let mut pass_this = LibraryObj::new();
+    pass_this.user_data = (&input_type).into();
+    // pass_this.dependencies = get_known_dependencies(); // TODO
+    // pass_this.shared_state = copy_shared_mem_data(); // TODO
+    pass_this.crate_name = std::env::var("CARGO_CRATE_NAME").unwrap_or("".into());
+    let mut lib_obj = get_wasm_output(
+        Some(conf.wasm_directory.clone()),
+        &item_name,
+        code,
+        add_to_code, 
+        &pass_this
+    ).unwrap_or_default();
+
+    if !lib_obj.compiler_error_message.is_empty() {
+        // TODO: currently we just add a compile_error to the end of the stream..
+        // in the future maybe search for a string, and replace the right hand side to compile_error
+        // so that we can put it on a specific line
+        let err = compiler_error(&lib_obj.compiler_error_message);
+        attr.extend([err]);
+    }
+
+    let mut add_after = vec![];
+    for s in lib_obj.add_code_after.drain(..) {
+        let tokens = TokenStream::from_str(&s).map_err(|e| {
+            compiler_error(&format!("Module '{}' produced invalid after_code tokens:\n{}\nError:\n{:?}", module_name, s, e))
+        })?;
+        add_after.push(tokens);
+    }
+
+    // TODO:
+    // save_shared_mem_data(std::mem::take(&mut lib_obj.shared_state));
+    // if should_output_command_files {
+    //     if let Err(e) = lib_obj.handle_file_ops(module_name, &item_name) {
+    //         panic!("{}", e);
+    //     }
+    // }
+
+    input_type.apply_library_obj_changes(lib_obj, &module_name);
+    let item = input_type.back_to_stream(&format!("_b{hash}"));
+
+    let func_name = format_ident!("_a{hash}");
+    let user_out = quote! {
+        // we use a random hash for the func name to not conflict with other invocations of this macro
+        fn #func_name() {
+            let cb = #attr;
+        }
+        #item
+
+        #(#add_after)*
+    };
+
+    Ok(user_out)
 }
 
 pub fn load_modules_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<Vec<TokenStream>, TokenStream> {

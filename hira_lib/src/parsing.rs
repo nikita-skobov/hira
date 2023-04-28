@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use proc_macro2::{
     TokenStream,
-    TokenTree,
+    TokenTree, Ident,
 };
 use quote::ToTokens;
 use syn::{
@@ -21,10 +21,10 @@ use syn::{
     ItemStruct,
     ItemTrait,
     ItemUnion,
-    Expr, ItemUse
+    Expr, ItemUse, Visibility, token::Pub
 };
 
-use crate::module_loading::HiraModule;
+use crate::{module_loading::HiraModule, wasm_types::{InputType, GlobalVariable}};
 
 pub fn default_stream() -> TokenStream {
     compiler_error("Failed to get hira config")
@@ -198,4 +198,90 @@ pub fn get_list_of_strings(stream: TokenStream) -> Vec<String> {
         }
     }
     out
+}
+
+pub fn rename_ident(id: &mut Ident, name: &str) {
+    if id.to_string() != name {
+        let span = id.span();
+        let new_ident = Ident::new(name, span);
+        *id = new_ident;
+    }
+}
+
+pub fn is_public(vis: &Visibility) -> bool {
+    match vis {
+        Visibility::Public(_) => true,
+        _ => false,
+    }
+}
+
+pub fn set_visibility(vis: &mut Visibility, is_pub: bool) {
+    let p = Pub::default();
+    match (&vis, is_pub) {
+        (Visibility::Public(_), false) => {
+            *vis = Visibility::Inherited;
+        }
+        (Visibility::Restricted(_), true) => {
+            *vis = Visibility::Public(p);
+        }
+        (Visibility::Inherited, true) => {
+            *vis = Visibility::Public(p);
+        }
+        _ => {}
+    }
+}
+
+pub fn get_input_type(item: proc_macro2::TokenStream) -> Option<InputType> {
+    let is_struct_input = syn::parse2::<ItemStruct>(item.clone()).ok();
+    if let Some(struct_input) = is_struct_input {
+        return Some(InputType::Struct(struct_input));
+    }
+    let is_fn_input = syn::parse2::<ItemFn>(item.clone()).ok();
+    if let Some(function_input) = is_fn_input {
+        return Some(InputType::Function(function_input));
+    }
+    let is_static_input = syn::parse2::<ItemStatic>(item.clone()).ok();
+    if let Some(input) = is_static_input {
+        return Some(InputType::GlobalVar(GlobalVariable::Static(input)));
+    }
+    let is_const_input = syn::parse2::<ItemConst>(item.clone()).ok();
+    if let Some(input) = is_const_input {
+        if input.ident.to_string() == "_" {
+            if let syn::Expr::Match(m) = *input.expr {
+                return Some(InputType::Match(m));
+            }
+        }
+        return Some(InputType::GlobalVar(GlobalVariable::Constant(input)));
+    }
+    let is_mod_input = syn::parse2::<ItemMod>(item.clone()).ok();
+    if let Some(input) = is_mod_input {
+        return Some(InputType::Module(input));
+    }
+    None
+}
+
+/// given the user's attribute in the hira macro, parse out the name of the module they are referencing
+pub fn parse_callback_required_module(attr_str: String) -> Result<String, String> {
+    let err_str = "Failed to parse signature of macro attribute. Expected a closure like |obj: &mut modulename::StructName| {{ ... }}";
+    // get everything in callback input signature |mything: &mut modulename::StructName| { ... }
+    let splits: Vec<_> = attr_str.split("|").collect();
+    let signature = match splits.get(1) {
+        Some(s) => *s,
+        None => return Err(format!("{}", err_str)),
+    };
+    // now signature looks like
+    // mything: &mut modulename::StructName
+    // actually it has spaces around it, but we can solve that by just removing the spaces
+    let signature_nospace = signature.replace(" ", "");
+    let after_mut = if let Some((_, b)) = signature_nospace.split_once("&mut") {
+        b.trim()
+    } else {
+        return Err(format!("{}", err_str));
+    };
+
+    if let Some((mod_name, _)) = after_mut.split_once("::") {
+        Ok(mod_name.to_string())
+    } else {
+        Err(format!("{}", err_str))
+    }
 }
