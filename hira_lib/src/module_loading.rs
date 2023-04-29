@@ -307,7 +307,7 @@ mod set_exports {
         if let syn::Visibility::Public(_) = item.vis {
             module.export_items.insert(item.ident.to_string(), item.to_token_stream().to_string());
         }
-        true
+        !item.attrs.iter().any(|x| x.meta.path().to_token_stream().to_string().contains("dont_compile"))
     }
     pub fn set_export_item_trait(module: &mut HiraModule, item: &syn::ItemTrait) -> bool {
         if let syn::Visibility::Public(_) = item.vis {
