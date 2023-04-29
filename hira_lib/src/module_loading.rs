@@ -300,6 +300,18 @@ mod set_exports {
         }
         true
     }
+    pub fn set_export_item_impl(module: &mut HiraModule, item: &syn::ItemImpl) -> bool {
+        let should_export = item.attrs.iter()
+            .any(|x| x.meta.path().to_token_stream().to_string().contains("do_compile"));
+        if should_export {
+            let mut item = item.clone();
+            item.attrs.clear();
+            let s = item.to_token_stream().to_string();
+            // TODO: why are module export items a hashmap?... just make it a list. this is silly
+            module.export_items.insert(s.clone(), s);
+        }
+        true
+    }
     pub fn set_export_item_enum(module: &mut HiraModule, item: &syn::ItemEnum) -> bool {
         if let syn::Visibility::Public(_) = item.vis {
             module.export_items.insert(item.ident.to_string(), item.to_token_stream().to_string());
@@ -384,6 +396,7 @@ pub fn load_module_from_file_string(conf: &mut HiraConfig, path: &str, module_st
         &[set_exports::set_export_item_struct],
         &[set_exports::set_export_item_trait],
         &[set_exports::set_export_item_union],
+        &[set_exports::set_export_item_impl],
         &[set_required_hira_mods],
     );
     out.contents = contents;
@@ -835,6 +848,26 @@ mod tests {
         let module = res.ok().unwrap();
         let included_code = module.to_token_stream(false).to_string();
         assert_eq!(included_code, "mod hello_world { # [macro_export] macro_rules ! hello { ($ dest : ident) => { stringify ! ($ dest) } ; } pub (crate) use hello ; }");
+    }
+
+    #[test]
+    fn hira_can_pass_impls_to_other_modules() {
+        let code = r#"
+        const HIRA_MODULE_NAME: &'static str = "hello_world";
+        type ExportType = Something;
+        pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {}
+
+        pub struct Hello {}
+        #[hira::do_compile]
+        impl Hello {
+            pub fn say_hi() { println!("hi"); }
+        }
+        "#;
+        let mut conf = HiraConfig::default();
+        let res = load_module_from_file_string(&mut conf, "a", code.to_string());
+        let module = res.ok().unwrap();
+        let included_code = module.to_token_stream(false).to_string();
+        assert!(included_code.contains("impl Hello"));
     }
 
     #[test]

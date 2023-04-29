@@ -21,7 +21,7 @@ use syn::{
     ItemStruct,
     ItemTrait,
     ItemUnion,
-    Expr, ItemUse, Visibility, token::Pub, ItemMacro
+    Expr, ItemUse, Visibility, token::Pub, ItemMacro, ItemImpl
 };
 
 use crate::{module_loading::HiraModule, wasm_types::{InputType, GlobalVariable}};
@@ -91,6 +91,7 @@ pub fn iterate_file(
     struct_callbacks: &[fn(&mut HiraModule, &ItemStruct) -> bool],
     trait_callbacks: &[fn(&mut HiraModule, &ItemTrait) -> bool],
     union_callbacks: &[fn(&mut HiraModule, &ItemUnion) -> bool],
+    impl_callbacks: &[fn(&mut HiraModule, &ItemImpl) -> bool],
     use_callbacks: &[fn(&mut HiraModule, &ItemUse) -> bool],
 ) -> String {
     let mut out = "".to_string();
@@ -120,6 +121,13 @@ pub fn iterate_file(
             }
             Item::Enum(x) => {
                 for cb in enum_callbacks {
+                    if !cb(module, x) {
+                        is_filtered = true;
+                    }
+                }
+            }
+            Item::Impl(x) => {
+                for cb in impl_callbacks {
                     if !cb(module, x) {
                         is_filtered = true;
                     }
