@@ -659,6 +659,10 @@ pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: To
 pub fn load_modules_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<Vec<TokenStream>, TokenStream> {
     let module_strings = get_list_of_strings(stream);
     let mut out = vec![];
+
+    let module_dir = &conf.modules_directory;
+    let _ = std::fs::create_dir_all(module_dir);
+
     for path in module_strings {
         let module = match load_module(conf, path) {
             Ok(o) => o,
