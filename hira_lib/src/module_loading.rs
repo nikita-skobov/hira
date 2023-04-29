@@ -5,7 +5,7 @@ use proc_macro2::TokenStream;
 use quote::{quote, format_ident, ToTokens};
 use syn::{parse_file, ItemUse};
 
-use crate::parsing::{remove_surrounding_quotes, get_input_type, parse_callback_required_module};
+use crate::parsing::{remove_surrounding_quotes, get_input_type, parse_callback_required_module, extract_default_attr};
 use crate::wasm_types::*;
 use wasm_type_gen::*;
 
@@ -575,6 +575,42 @@ pub fn run_module_validate_user_input(
     Ok((input_type, depends_on_module, hash))
 }
 
+pub fn load_module_default(mut items: TokenStream) -> TokenStream {
+    let mut out = Err(default_stream());
+    let out_ref = &mut out;
+    use_hira_config(|conf| {
+        let items = std::mem::take(&mut items);
+        *out_ref = load_module_default_inner(conf, items);
+    });
+    match out {
+        Ok(o) => o,
+        Err(e) => e,
+    }
+}
+
+pub fn load_module_default_inner(conf: &mut HiraConfig, items: TokenStream) -> Result<TokenStream, TokenStream> {
+    let (path, rest_of_items) = extract_default_attr(items)?;
+    let module = match load_module(conf, path) {
+        Ok(o) => o,
+        Err(e) => {
+            return Err(compiler_error(&e));
+        }
+    };
+
+    let fn_ident = format_ident!("_{}_default", module.name);
+    let mod_def = module.to_token_stream(false);
+    conf.default_callbacks.insert(module.name.clone(), rest_of_items.to_string());
+    conf.loaded_modules.insert(module.name.clone(), module);
+
+    Ok(quote! {
+        #mod_def
+
+        fn #fn_ident() {
+            let cb = #rest_of_items;
+        }
+    })
+}
+
 pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: TokenStream) -> Result<TokenStream, TokenStream> {
     // this is a hack to allow people who write wasm_modules easy type hints.
     // if we detect no attributes, then we just output all of the types that
@@ -606,6 +642,7 @@ pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: To
         let req_module = conf.get_module(&req).map_err(|e| compiler_error(&format!("Failed to load required module for '{}'\n{:?}", module_name, e)))?;
         extra_mod_defs.push(req_module.to_token_stream(true));
     }
+    let default_cb = conf.default_callbacks.get(&module_name).map(|x| x.to_owned());
     let module = conf.get_module(&module_name).map_err(|e| compiler_error(&e))?;
 
     // form the code that we will actually compile:
@@ -613,7 +650,9 @@ pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: To
         compiler_error(&format!("Failed to parse '{}' as valid rust code. Error:\n{:?}", module.name, e))
     })?;
     let (code, add_to_code) = get_wasm_code_to_compile(
-        &module_name, &module.primary_export_item, &attr, parsed_wasm_code, extra_mod_defs
+        &module_name, &module.primary_export_item,
+        &attr, parsed_wasm_code, extra_mod_defs,
+        default_cb
     );
 
     let item_name = input_type.get_name();

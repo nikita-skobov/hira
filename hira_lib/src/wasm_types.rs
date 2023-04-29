@@ -507,6 +507,7 @@ pub fn get_wasm_code_to_compile(
     attr: &TokenStream,
     parsed_wasm_code: File,
     required_hira_mods: Vec<TokenStream>,
+    default_cb: Option<String>,
 ) -> (String, Option<String>) {
     let mut add_to_code = LibraryObj::include_in_rs_wasm();
     add_to_code.push_str(LibraryObj::gen_entrypoint());
@@ -514,25 +515,28 @@ pub fn get_wasm_code_to_compile(
     add_to_code.push_str(lib_obj_impl());
     add_to_code.push_str(user_data_impl());
 
-    // TODO: support default user function callbacks
-    // let users_fn_def = if let Some(defcb) = get_default_user_cb(module_name) {
-    //     quote! {
-    //         pub fn users_fn(data: &mut #module_name_ident::#exported_name) {
-    //             let cb = #attr;
-    //             let default_cb = #defcb;
-    //             default_cb(data);
-    //             cb(data);
-    //         }
-    //     }
-    // } else {
-    // };
+    let mut default_cb_stream = None;
+    if let Some(defcb) = default_cb {
+        default_cb_stream = TokenStream::from_str(&defcb).ok();
+    }
 
     let module_name_ident = format_ident!("{module_name}");
     let exported_name = format_ident!("{exported_name}");
-    let users_fn = quote! {
-        pub fn users_fn(data: &mut #module_name_ident::#exported_name) {
-            let cb = #attr;
-            cb(data);
+    let users_fn = if let Some(defcb) = default_cb_stream {
+        quote! {
+            pub fn users_fn(data: &mut #module_name_ident::#exported_name) {
+                let cb = #attr;
+                let default_cb = #defcb;
+                default_cb(data);
+                cb(data);
+            }
+        }
+    } else {
+        quote! {
+            pub fn users_fn(data: &mut #module_name_ident::#exported_name) {
+                let cb = #attr;
+                cb(data);
+            }
         }
     };
 

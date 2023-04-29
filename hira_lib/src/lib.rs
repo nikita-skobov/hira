@@ -31,6 +31,9 @@ pub struct HiraConfig {
     pub loaded_modules: HashMap<String, module_loading::HiraModule>,
     pub shared_data: HashMap<String, String>,
     pub shared_file_data: Vec<MapEntry<MapEntry<String>>>,
+    /// a map of module name to a string containing callback code that should
+    /// run prior to any invocation of this module.
+    pub default_callbacks: HashMap<String, String>,
 }
 
 impl HiraConfig {
@@ -410,9 +413,15 @@ mod e2e_tests {
                     cb(&mut mydata);
                 }
             ),
-            |_conf| {}
+            |conf| {
+                conf.default_callbacks.insert("my_mod".to_string(), r#"
+                |obj: &mut my_mod::Something| {
+                    obj.a = 100;
+                }
+                "#.to_string());
+            }
         );
-        let (_, res) = res.ok().unwrap();
+        let (_, _res) = res.ok().unwrap();
     }
 
     #[test]

@@ -285,3 +285,29 @@ pub fn parse_callback_required_module(attr_str: String) -> Result<String, String
         Err(format!("{}", err_str))
     }
 }
+
+pub fn extract_default_attr(stream: TokenStream) -> Result<(String, TokenStream), TokenStream> {
+    let mut items_iter = stream.into_iter();
+    let path = match items_iter.next() {
+        Some(proc_macro2::TokenTree::Literal(l)) => {
+            let mut path = l.to_string();
+            remove_surrounding_quotes(&mut path);
+            path
+        }
+        _ => return Err(compiler_error("hira_module_default expects first argument to be a literal string of your module path")),
+    };
+
+    let mut has_punct = false;
+    if let Some(proc_macro2::TokenTree::Punct(p)) = items_iter.next() {
+        if p.as_char() == ',' {
+            has_punct = true;
+        }
+    }
+    if !has_punct {
+        return Err(compiler_error("hira_module_default expects a comma after module path and before your callback"));
+    }
+    // we assume that the user entered this correctly. we dont do any validation to speed up compilation.
+    // if the user makes an error here, it should be showed to them by their IDE/compiler.
+    let rest_of_items: proc_macro2::TokenStream = items_iter.collect();
+    Ok((path, rest_of_items))
+}
