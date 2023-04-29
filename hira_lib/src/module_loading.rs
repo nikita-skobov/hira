@@ -60,7 +60,7 @@ impl Default for HiraModule {
 }
 
 impl HiraModule {
-    pub fn to_token_stream(&self) -> TokenStream {
+    pub fn to_token_stream(&self, include_super: bool) -> TokenStream {
         let module_name = format_ident!("{}", self.name);
         let export_items: Vec<TokenStream> = self.export_items.iter().map(|(_, v)| {
             TokenStream::from_str(v)
@@ -72,13 +72,24 @@ impl HiraModule {
         // #(#attrs)*
         // #[doc = #export_str]
         // #export
-        let stream = quote! {
-            mod #module_name {
-                #(#export_items)*
+
+        if include_super {
+            quote! {
+                mod #module_name {
+                    use super::LibraryObj;
+                    use super::UserData;
+                    #(#export_items)*
+                }
             }
-        };
-        stream
+        } else {
+            quote! {
+                mod #module_name {
+                    #(#export_items)*
+                }
+            }
+        }
     }
+
     pub fn verify(&self, conf: &mut HiraConfig) -> String {
         let mut out = String::new();
         if self.name.is_empty() {
@@ -520,7 +531,7 @@ pub fn run_module_include_only(conf: &mut HiraConfig, stream: TokenStream) -> Re
                 return Err(compiler_error(&e));
             }
         };
-        extra_mod_defs.push(module.to_token_stream());
+        extra_mod_defs.push(module.to_token_stream(true));
     }
 
     let mut include_str = LibraryObj::include_in_rs_wasm();
@@ -593,7 +604,7 @@ pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: To
     let mut extra_mod_defs = vec![];
     for req in requirements {
         let req_module = conf.get_module(&req).map_err(|e| compiler_error(&format!("Failed to load required module for '{}'\n{:?}", module_name, e)))?;
-        extra_mod_defs.push(req_module.to_token_stream());
+        extra_mod_defs.push(req_module.to_token_stream(true));
     }
     let module = conf.get_module(&module_name).map_err(|e| compiler_error(&e))?;
 
@@ -670,7 +681,7 @@ pub fn load_modules_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<
                 return Err(compiler_error(&e));
             }
         };
-        out.push(module.to_token_stream());
+        out.push(module.to_token_stream(false));
         conf.loaded_modules.insert(module.name.clone(), module);
     }
     Ok(out)
