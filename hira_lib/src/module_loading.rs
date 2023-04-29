@@ -90,20 +90,20 @@ impl HiraModule {
         }
     }
 
-    pub fn verify(&self, conf: &mut HiraConfig) -> String {
+    pub fn verify(&self, conf: &mut HiraConfig, loaded_from_path: &str) -> String {
         let mut out = String::new();
         if self.name.is_empty() {
-            out = format!("Failed to find `const {HIRA_MOD_NAME_NAME}`\nMust provide a hira module name");
+            out = format!("Failed to find `const {HIRA_MOD_NAME_NAME}` from '{loaded_from_path}'\nMust provide a hira module name");
             return out;
         }
         let split = self.name.split("_");
         let num_components = split.into_iter().count();
         if num_components != 2 {
-            out = format!("Invalid `const {HIRA_MOD_NAME_NAME} = \"{}\"`\nhira module name must contain 1 underscore.", self.name);
+            out = format!("Invalid `const {HIRA_MOD_NAME_NAME} = \"{}\"` from '{loaded_from_path}'\nhira module name must contain 1 underscore.", self.name);
             return out;
         }
         if conf.loaded_modules.contains_key(&self.name) {
-            out = format!("Duplicate module loading error. '{}' already exists", self.name);
+            out = format!("Duplicate module loading error from '{}'. Module '{}' already exists", loaded_from_path, self.name);
             return out;
         }
         for req in &self.required_crates {
@@ -372,7 +372,7 @@ pub fn load_module_from_file_string(conf: &mut HiraConfig, path: &str, module_st
     );
     out.contents = contents;
 
-    let err_str = out.verify(conf);
+    let err_str = out.verify(conf, path);
     if !err_str.is_empty() {
         return Err(err_str);
     }
@@ -599,7 +599,7 @@ pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: To
     // should be a fast operation once the modules are loaded though
     let requirements = {
         let module = conf.get_module(&module_name).map_err(|e| compiler_error(&e))?;
-        module.required_crates.clone()
+        module.required_hira_modules.clone()
     };
     let mut extra_mod_defs = vec![];
     for req in requirements {
@@ -715,7 +715,7 @@ mod tests {
         let res = load_module_from_file_string(&mut conf, "a", code.to_string());
         assert!(res.is_err());
         let err = res.err().unwrap();
-        assert_eq!(err, "Failed to find `const HIRA_MODULE_NAME`\nMust provide a hira module name");
+        assert_eq!(err, "Failed to find `const HIRA_MODULE_NAME` from 'a'\nMust provide a hira module name");
     }
 
     #[test]
@@ -744,7 +744,7 @@ mod tests {
         let res = load_module_from_file_string(&mut conf, "a", code.to_string());
         assert!(res.is_err());
         let err = res.err().unwrap();
-        assert_eq!(err, "Duplicate module loading error. 'hello_world' already exists");
+        assert_eq!(err, "Duplicate module loading error from 'a'. Module 'hello_world' already exists");
     }
 
     #[test]
