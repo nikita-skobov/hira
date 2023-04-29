@@ -1,7 +1,7 @@
 #[hira::hira] use {
-    hira_awsregions
+    hira_awsregions,
+    hira_awscfn,
 };
-
 
 #[derive(Default)]
 pub struct LambdaInput {
@@ -258,7 +258,6 @@ pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut LambdaInput)) {
     let param2 = format!("{key_param}={users_func_name}_$md5{users_func_name}.zip");
 
     let deploy_file = "deploy.sh";
-    let cfn_file = "deploy.yml";
     let pre_build = "# 0. pre-build:";
     let build = "# 1. build:";
     let package = "# 2. package:";
@@ -275,11 +274,5 @@ pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut LambdaInput)) {
     obj.append_to_file(deploy_file, package, deployartifactcmd);
     obj.append_to_line(deploy_file, deploy, deploycfncmd, format!("{param1} {param2} "));
 
-    obj.append_to_file_unique(cfn_file, "# 0", "AWSTemplateFormatVersion: '2010-09-09'".into());
-    obj.append_to_file_unique(cfn_file, "# 0", "Parameters:".into());
-    obj.append_to_file_unique(cfn_file, "# 1", format!("    DefaultParam:\n        Type: String"));
-    obj.append_to_file(cfn_file, "# 1", format!("    {bucket_param}:\n        Type: String"));
-    obj.append_to_file(cfn_file, "# 1", format!("    {key_param}:\n        Type: String"));
-    obj.append_to_file_unique(cfn_file, "# 2", "Resources:".into());
-    obj.append_to_file(cfn_file, "# 3", cfn_resources);
+    hira_awscfn::output_cfn_file(obj, &[bucket_param, key_param], cfn_resources);
 }
