@@ -17,7 +17,12 @@ mod tests {
             a.region = "not-a-region".into();
         };
         let mut obj = LibraryObj::new();
-        obj.user_data = UserData::Function { name: "".into(), is_pub: true, is_async: true, inputs: vec![], return_ty: "".into() };
+        let user_input = UserInput {
+            is_self: false,
+            name: "hello".to_string(),
+            ty: "String".to_string(),
+        };
+        obj.user_data = UserData::Function { name: "".into(), is_pub: true, is_async: true, inputs: vec![user_input], return_ty: "String".into() };
         wasm_entrypoint(&mut obj, cb as _);
         assert!(obj.compiler_error_message.starts_with("Invalid region code"));
     }
