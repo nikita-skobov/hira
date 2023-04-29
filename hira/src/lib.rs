@@ -24,3 +24,12 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
 pub fn dont_compile(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     item
 }
+
+/// This is a no-op during compilation.
+/// its only necessary for wasm evaluation to know
+/// which parts of the code to compile into wasm even though
+/// they arent marked pub
+#[proc_macro_attribute]
+pub fn do_compile(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    item
+}
