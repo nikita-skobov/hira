@@ -25,10 +25,31 @@ pub struct LambdaInput {
     /// timeout of your function (in seconds). Defaults to 30.
     /// Valid values: 1 - 900
     pub timeout: u32,
+
+    /// set to true if a function URL should
+    /// be created for this lambda.
+    pub use_event_function_url: bool,
+}
+
+#[hira::dont_compile]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct FunctionUrlEvent {
+    pub version: String,
+    pub body: String,
+    pub is_base64_encoded: bool,
+}
+
+#[hira::dont_compile]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct FunctionUrlResponse {
+    pub status_code: u32,
+    pub body: String,
+    pub is_base64_encoded: bool,
+    pub headers: std::collections::HashMap<String, String>,
 }
 
 pub const HIRA_MODULE_NAME: &'static str = "hira_lambda";
-pub const REQUIRED_CRATES: &[&'static str] = &["tokio", "lambda_runtime"];
+pub const REQUIRED_CRATES: &[&'static str] = &["tokio", "lambda_runtime", "serde"];
 
 pub type ExportType = LambdaInput;
 
@@ -52,42 +73,34 @@ impl LambdaInput {
         out.timeout = 30;
         out
     }
-    pub fn verify_and_output_cfn(&self, obj: &mut LibraryObj) -> Option<(String, String, String)> {
-        if !self.is_valid(obj) {
-            return None;
+    pub fn verify_and_output_cfn(&self) -> Result<(String, String, String), String> {
+        match self.is_valid() {
+            Some(err) => Err(err),
+            None => Ok(self.output_cfn()),
         }
-        Some(self.output_cfn())
     }
-    pub fn is_valid(&self, obj: &mut LibraryObj) -> bool {
+    pub fn is_valid(&self) -> Option<String> {
         if self.resource_name.len() > 255 {
-            obj.compile_error(&format!("Invalid resource name {:?}\nmust be less than 255 characters", self.resource_name));
-            return false;
+            return Some(format!("Invalid resource name {:?}\nmust be less than 255 characters", self.resource_name));
         }
         if self.resource_name.len() < 1 {
-            obj.compile_error(&format!("Invalid resource name {:?}\nMust contain at least 1 character", self.resource_name));
-            return false;
+            return Some(format!("Invalid resource name {:?}\nMust contain at least 1 character", self.resource_name));
         }
         if !self.resource_name.chars().all(|c| c.is_ascii_alphanumeric()) {
-            obj.compile_error(&format!("Invalid resource name {:?}\nMust contain only alphanumeric characters [A-Za-z0-9]", self.resource_name));
-            return false;
+            return Some(format!("Invalid resource name {:?}\nMust contain only alphanumeric characters [A-Za-z0-9]", self.resource_name));
         }
         if self.function_name.len() > 64 {
-            obj.compile_error(&format!("Invalid function name {:?}\nMust be at most 64 characters", self.function_name));
-            return false;
+            return Some(format!("Invalid function name {:?}\nMust be at most 64 characters", self.function_name));
         }
-        if !hira_awsregions::verify_region(obj, &self.region.as_str()) {
-            return false;
-        }
+        let region_err = hira_awsregions::verify_region(&self.region.as_str());
+        if region_err.is_some() { return region_err }
         if self.memory_size < 128 || self.memory_size > 10240 {
-            obj.compile_error(&format!("Invalid memory size {:?}\nMust be between 128 and 10240", self.memory_size));
-            return false;
+            return Some(format!("Invalid memory size {:?}\nMust be between 128 and 10240", self.memory_size));
         }
         if self.timeout < 1 || self.timeout > 900 {
-            obj.compile_error(&format!("Invalid timeout {:?}\nMust be between 1 and 900", self.timeout));
-            return false;
+            return Some(format!("Invalid timeout {:?}\nMust be between 1 and 900", self.timeout));
         }
-
-        true
+        None
     }
 
     pub fn output_cfn(&self) -> (String, String, String) {
@@ -140,17 +153,9 @@ r#"    {resource_name}:
 
 pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut LambdaInput)) {
     let mut lambda_input = LambdaInput::new(obj);
-    // call the user's callback to let them modify the default lambda config
-    cb(&mut lambda_input);
-    let (cfn_resources, bucket_param, key_param) = if let Some(x) = lambda_input.verify_and_output_cfn(obj) {
-        x
-    } else {
-        return;
-    };
-
     let (name, is_async, inputs, return_ty) = match &obj.user_data {
         UserData::Function { name, is_async, inputs, return_ty, .. } => {
-            (name, is_async, inputs, return_ty)
+            (name.to_string(), *is_async, inputs.clone(), return_ty.clone())
         }
         _ => {
             obj.compile_error("This module can only be applied to a function");
@@ -173,9 +178,7 @@ pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut LambdaInput)) {
     };
 
     let service_func_name = format!("service_func_{name}");
-    let users_func_name = name;
-    let region = &lambda_input.region;
-    let region_underscores = region.replace("-", "_");
+    let users_func_name = &name;
 
     let input_param = if let Some(f) = inputs.first() {
         f
@@ -188,7 +191,21 @@ pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut LambdaInput)) {
         return;
     }
     let input_param_type = &input_param.ty;
-    let mut return_statement = if *is_async {
+
+    // call the user's callback to let them modify the default lambda config
+    cb(&mut lambda_input);
+    let (cfn_resources, bucket_param, key_param) = match lambda_input.verify_and_output_cfn() {
+        Ok(out) => out,
+        Err(e) => {
+            obj.compile_error(&e);
+            return;
+        }
+    };
+
+    let region = &lambda_input.region;
+    let region_underscores = region.replace("-", "_");
+
+    let mut return_statement = if is_async {
         format!("{users_func_name}(x).await")
     } else {
         format!("{users_func_name}(x)")
@@ -218,7 +235,7 @@ pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut LambdaInput)) {
             Ok(())
         }
     );
-    let main_func_def = main_func_def.replace("CFG_NAME", users_func_name);
+    let main_func_def = main_func_def.replace("CFG_NAME", &users_func_name);
     let main_func_def = main_func_def.replace("service_func_name", &service_func_name);
     obj.add_code_after.push(main_func_def);
     obj.add_code_after.push(service_func_def);
