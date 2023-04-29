@@ -39,12 +39,12 @@ pub fn is_valid_region(r: &str) -> bool {
     VALID_AWS_REGIONS.contains(&r)
 }
 
-pub fn verify_region(obj: &mut LibraryObj, r: &str) -> bool {
+pub fn verify_region(r: &str) -> Option<String> {
     if !is_valid_region(r) {
-        obj.compile_error(&format!("Invalid region code {:?}\nMust be one of {:?}", r, VALID_AWS_REGIONS));
-        return false;
+        Some(format!("Invalid region code {:?}\nMust be one of {:?}", r, VALID_AWS_REGIONS))
+    } else {
+        None
     }
-    true
 }
 
 #[allow(dead_code)]
