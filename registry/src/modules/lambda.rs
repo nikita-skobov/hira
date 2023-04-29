@@ -33,6 +33,9 @@ pub struct LambdaInput {
 
 #[hira::dont_compile]
 #[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(default)]
+#[derive(Default)]
 pub struct FunctionUrlEvent {
     pub version: String,
     pub body: String,
@@ -41,6 +44,7 @@ pub struct FunctionUrlEvent {
 
 #[hira::dont_compile]
 #[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FunctionUrlResponse {
     pub status_code: u32,
     pub body: String,
@@ -104,7 +108,7 @@ impl LambdaInput {
     }
 
     pub fn output_cfn(&self) -> (String, String, String) {
-        let Self { resource_name, function_name, memory_size, timeout, .. } = self;
+        let Self { resource_name, function_name, memory_size, timeout, use_event_function_url, .. } = self;
         let func_name = if function_name.is_empty() {
             "# FunctionName will be auto-generated".into()
         } else {
@@ -118,7 +122,7 @@ impl LambdaInput {
         let bucket_param = format!("ArtifactBucket{func_name_no_underscores}");
         let key_param = format!("ArtifactKey{func_name_no_underscores}");
 
-        let x = format!(
+        let mut x = format!(
 r#"    {resource_name}:
         Type: 'AWS::Lambda::Function'
         Properties:
@@ -147,6 +151,21 @@ r#"    {resource_name}:
             ManagedPolicyArns:
             - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
 "#);
+        if *use_event_function_url {
+            x = format!(r#"{x}    LambdaTrigger{resource_name}:
+        Type: AWS::Lambda::Url
+        Properties:
+            AuthType: NONE
+            TargetFunctionArn: !GetAtt {resource_name}.Arn
+    LambdaPermission{resource_name}:
+        Type: AWS::Lambda::Permission
+        Properties:
+            Action: 'lambda:InvokeFunctionUrl'
+            FunctionName: !GetAtt {resource_name}.Arn
+            FunctionUrlAuthType: NONE
+            Principal: '*'
+"#);
+        }
         (x, bucket_param, key_param)
     }
 }
@@ -191,6 +210,9 @@ pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut LambdaInput)) {
         return;
     }
     let input_param_type = &input_param.ty;
+    if input_param_type == "hira_lambda :: FunctionUrlEvent" {
+        lambda_input.use_event_function_url = true;
+    }
 
     // call the user's callback to let them modify the default lambda config
     cb(&mut lambda_input);
