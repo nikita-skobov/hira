@@ -285,6 +285,21 @@ fn remove_recursive_hira_macro(_module: &mut HiraModule, item: &syn::ItemMod) ->
 mod set_exports {
     use super::*;
 
+    pub fn set_export_item_macro(module: &mut HiraModule, item: &syn::ItemMacro) -> bool {
+        let should_export = item.attrs.iter()
+            .any(|x| x.meta.path().to_token_stream().to_string().contains("do_compile"));
+        if should_export {
+            let mut item = item.clone();
+            item.attrs.clear();
+            let mut name = item.ident.to_token_stream().to_string();
+            remove_surrounding_quotes(&mut name);
+            let mut out_string = item.to_token_stream().to_string();
+            out_string = format!("#[macro_export]{out_string}");
+            out_string.push_str(&format!("\npub(crate) use {name};"));
+            module.export_items.insert(name, out_string);
+        }
+        true
+    }
     pub fn set_export_item_enum(module: &mut HiraModule, item: &syn::ItemEnum) -> bool {
         if let syn::Visibility::Public(_) = item.vis {
             module.export_items.insert(item.ident.to_string(), item.to_token_stream().to_string());
@@ -364,6 +379,7 @@ pub fn load_module_from_file_string(conf: &mut HiraConfig, path: &str, module_st
         &[set_primary_export_item, set_exports::set_export_item_type],
         &[set_exports::set_export_item_enum],
         &[set_exports::set_export_item_mod, remove_recursive_hira_macro],
+        &[set_exports::set_export_item_macro],
         &[set_exports::set_export_item_static],
         &[set_exports::set_export_item_struct],
         &[set_exports::set_export_item_trait],
@@ -798,6 +814,27 @@ mod tests {
         let res = load_module_from_file_string(&mut conf, "a", code.to_string());
         let err = res.err().unwrap();
         assert_eq!(err, "hira module 'hello_world' depends on crate 'tokio'. Add this to your Cargo.toml file.");
+    }
+
+    #[test]
+    fn hira_can_pass_macros_to_other_modules() {
+        let code = r#"
+        const HIRA_MODULE_NAME: &'static str = "hello_world";
+        type ExportType = Something;
+        pub fn wasm_entrypoint(obj: &mut LibraryObj, cb: fn(&mut Something)) {}
+
+        #[hira::do_compile]
+        macro_rules! hello {
+            ($dest:ident) => {
+                stringify!($dest)
+            };
+        }
+        "#;
+        let mut conf = HiraConfig::default();
+        let res = load_module_from_file_string(&mut conf, "a", code.to_string());
+        let module = res.ok().unwrap();
+        let included_code = module.to_token_stream(false).to_string();
+        assert_eq!(included_code, "mod hello_world { # [macro_export] macro_rules ! hello { ($ dest : ident) => { stringify ! ($ dest) } ; } pub (crate) use hello ; }");
     }
 
     #[test]
