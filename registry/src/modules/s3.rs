@@ -1,4 +1,7 @@
-#[hira::hira] mod _typehints {}
+#[hira::hira] use {};
+
+#[allow(dead_code)]
+const HIRA_MODULE_NAME: &'static str = "hira_s3";
 
 const VALID_AWS_REGIONS: &[&'static str] = &[
     "us-east-1",

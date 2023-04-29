@@ -1,6 +1,9 @@
-#[hira::hira] mod _typehints {}
+#[hira::hira] use {};
 
-pub type ExportType = CloudfrontInput;
+#[allow(dead_code)]
+const HIRA_MODULE_NAME: &'static str = "hira_cloudfront";
+#[allow(dead_code)]
+type ExportType = CloudfrontInput;
 
 #[derive(Default)]
 pub struct CloudfrontInput {

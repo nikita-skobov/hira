@@ -1,4 +1,6 @@
-#[hira::hira] mod _typehints {}
+#[hira::hira] use {
+    hira_awsregions
+};
 
 
 #[derive(Default)]
@@ -25,41 +27,10 @@ pub struct LambdaInput {
     pub timeout: u32,
 }
 
+pub const HIRA_MODULE_NAME: &'static str = "hira_lambda";
 pub const REQUIRED_CRATES: &[&'static str] = &["tokio", "lambda_runtime"];
 
 pub type ExportType = LambdaInput;
-
-const VALID_AWS_REGIONS: &[&'static str] = &[
-    "us-east-1",
-    "us-east-2",
-    "us-west-1",
-    "us-west-2",
-    "ca-central-1",
-    "eu-north-1",
-    "eu-west-3",
-    "eu-west-2",
-    "eu-west-1",
-    "eu-central-1",
-    "eu-south-1",
-    "ap-south-1",
-    "ap-northeast-1",
-    "ap-northeast-2",
-    "ap-northeast-3",
-    "ap-southeast-1",
-    "ap-southeast-2",
-    "ap-southeast-3",
-    "ap-east-1",
-    "sa-east-1",
-    "cn-north-1",
-    "cn-northwest-1",
-    "us-gov-east-1",
-    "us-gov-west-1",
-    "us-gov-secret-1",
-    "us-gov-topsecret-1",
-    "us-gov-topsecret-2",
-    "me-south-1",
-    "af-south-1",
-];
 
 impl LambdaInput {
     const RESOURCE_NAME_PREFIX: &'static str = "Lambda";
@@ -104,8 +75,7 @@ impl LambdaInput {
             obj.compile_error(&format!("Invalid function name {:?}\nMust be at most 64 characters", self.function_name));
             return false;
         }
-        if !VALID_AWS_REGIONS.contains(&self.region.as_str()) {
-            obj.compile_error(&format!("Invalid region code {:?}\nMust be one of {:?}", self.region, VALID_AWS_REGIONS));
+        if !hira_awsregions::verify_region(obj, &self.region.as_str()) {
             return false;
         }
         if self.memory_size < 128 || self.memory_size > 10240 {
