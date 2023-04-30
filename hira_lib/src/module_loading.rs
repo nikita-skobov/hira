@@ -62,8 +62,13 @@ impl Default for HiraModule {
 impl HiraModule {
     pub fn to_token_stream(&self, include_super: bool) -> TokenStream {
         let module_name = format_ident!("{}", self.name);
-        let export_items: Vec<TokenStream> = self.export_items.iter().map(|(_, v)| {
-            TokenStream::from_str(v)
+        let mut list = self.export_items.iter().map(|(_, v)| {
+            v.clone()
+        }).collect::<Vec<String>>();
+        // we want it to be deterministic
+        list.sort();
+        let export_items: Vec<TokenStream> = list.drain(..).map(|v| {
+            TokenStream::from_str(&v)
         })
         .filter_map(|x| x.ok())
         .collect();
@@ -662,39 +667,39 @@ pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: To
     // need to get the module once and clone its required crates
     // and then get the module again after loading all of its requirements...
     // should be a fast operation once the modules are loaded though
-    let requirements = {
+    let mut requirements = {
         let module = conf.get_module(&module_name).map_err(|e| compiler_error(&e))?;
         module.required_hira_modules.clone()
     };
+    requirements.sort();
     let mut extra_mod_defs = vec![];
     for req in requirements {
         let req_module = conf.get_module(&req).map_err(|e| compiler_error(&format!("Failed to load required module for '{}'\n{:?}", module_name, e)))?;
         extra_mod_defs.push(req_module.to_token_stream(true));
     }
     let default_cb = conf.default_callbacks.get(&module_name).map(|x| x.to_owned());
+    let hira_base_code = conf.hira_base_code.clone();
     let module = conf.get_module(&module_name).map_err(|e| compiler_error(&e))?;
 
     // form the code that we will actually compile:
     let parsed_wasm_code = parse_file(&module.contents).map_err(|e| {
         compiler_error(&format!("Failed to parse '{}' as valid rust code. Error:\n{:?}", module.name, e))
     })?;
-    let (code, add_to_code) = get_wasm_code_to_compile(
-        &module_name, &module.primary_export_item,
-        &attr, parsed_wasm_code, extra_mod_defs,
-        default_cb
+    let item_name = input_type.get_name();
+    let code = get_wasm_code_to_compile(
+        hira_base_code, &module_name, &item_name,
+        &module.primary_export_item, &attr, parsed_wasm_code,
+        extra_mod_defs, default_cb
     );
 
-    let item_name = input_type.get_name();
     let mut pass_this = LibraryObj::new();
     pass_this.user_data = (&input_type).into();
     pass_this.dependencies = Vec::from_iter(conf.known_cargo_dependencies.clone());
     pass_this.shared_state = conf.shared_data.clone();
     pass_this.crate_name = std::env::var("CARGO_CRATE_NAME").unwrap_or("".into());
     let mut lib_obj = get_wasm_output(
-        Some(conf.wasm_directory.clone()),
-        &item_name,
-        code,
-        add_to_code, 
+        &conf.wasm_directory,
+        &code,
         &pass_this
     ).unwrap_or_default();
 

@@ -353,13 +353,13 @@ impl LibraryObj {
         }
     }
     #[allow(dead_code)]
-    fn compile_error(&mut self, err_msg: &str) {
+    pub fn compile_error(&mut self, err_msg: &str) {
         self.compiler_error_message = err_msg.into();
     }
     /// a simple utility for generating 'hashes' based on some arbitrary input.
     /// Read more about adler32 here: https://en.wikipedia.org/wiki/Adler-32
     #[allow(dead_code)]
-    fn adler32(&mut self, data: &[u8]) -> u32 {
+    pub fn adler32(&mut self, data: &[u8]) -> u32 {
         let mod_adler = 65521;
         let mut a: u32 = 1;
         let mut b: u32 = 0;
@@ -394,13 +394,13 @@ impl LibraryObj {
     /// line2
     /// ```
     #[allow(dead_code)]
-    fn append_to_file(&mut self, name: &str, label: &str, line: String) {
+    pub fn append_to_file(&mut self, name: &str, label: &str, line: String) {
         self.shared_output_data.push(SharedOutputEntry { label: label.into(), line, filename: name.into(), unique: false, after: None });
     }
 
     /// same as append_to_file, but the line will be unique within the label
     #[allow(dead_code)]
-    fn append_to_file_unique(&mut self, name: &str, label: &str, line: String) {
+    pub fn append_to_file_unique(&mut self, name: &str, label: &str, line: String) {
         self.shared_output_data.push(SharedOutputEntry { label: label.into(), line, filename: name.into(), unique: true, after: None });
     }
 
@@ -415,7 +415,7 @@ impl LibraryObj {
     /// hello world, and also my friend Tim!
     /// ```
     #[allow(dead_code)]
-    fn append_to_line(&mut self, name: &str, label: &str, search_str: String, after: String) {
+    pub fn append_to_line(&mut self, name: &str, label: &str, search_str: String, after: String) {
         self.shared_output_data.push(SharedOutputEntry { label: label.into(), line: search_str, filename: name.into(), unique: false, after: Some(after) });
     }
 }
@@ -423,7 +423,7 @@ impl LibraryObj {
 #[output_and_stringify_basic_const(USER_DATA_IMPL)]
 impl UserData {
     #[allow(dead_code)]
-    fn new() -> Self {
+    pub fn new() -> Self {
         UserData::Missing
     }
     /// Get the name of the user's data that they put this macro over.
@@ -432,7 +432,7 @@ impl UserData {
     /// or `pub fn helloworld(a: u32) { ... }` returns "helloworld"
     /// Can rename the user's data type by modifying this string directly
     #[allow(dead_code)]
-    fn get_name(&mut self) -> &mut String {
+    pub fn get_name(&mut self) -> &mut String {
         match self {
             UserData::Struct { name, .. } => name,
             UserData::Function { name, .. } => name,
@@ -445,7 +445,7 @@ impl UserData {
     /// Returns a bool of whether or not the user marked their data as pub or not.
     /// Can set this value to true or false depending on your module's purpose.
     #[allow(dead_code)]
-    fn get_public_vis(&mut self) -> &mut bool {
+    pub fn get_public_vis(&mut self) -> &mut bool {
         match self {
             UserData::Struct { is_pub, .. } => is_pub,
             UserData::Function { is_pub, .. } => is_pub,
@@ -486,13 +486,12 @@ pub fn to_map_entry(data: Vec<SharedOutputEntry>) -> Vec<MapEntry<MapEntry<(bool
 
 /// TODO: should this fn be allowed to panic???
 pub fn get_wasm_output(
-    wasm_out_dir: Option<String>,
-    out_name_hash: &str,
-    wasm_source: String,
-    add_to_source: Option<String>,
+    wasm_out_dir: &str,
+    code: &[(String, String)],
     data_to_pass: &LibraryObj,
 ) -> Option<LibraryObj> {
-    let out_file = compile_string_to_wasm(out_name_hash, &wasm_source, add_to_source, wasm_out_dir).expect("compilation error");
+    let _ = std::fs::create_dir_all(wasm_out_dir);
+    let out_file = wasm_type_gen::compile_strings_to_wasm(code, wasm_out_dir).expect("compilation error");
     let wasm_file = std::fs::read(out_file).expect("failed to read wasm binary");
     let out = run_wasm(&wasm_file, data_to_pass.to_binary_slice()).expect("runtime error running wasm");
     LibraryObj::from_binary_slice(out)
@@ -502,24 +501,30 @@ pub fn get_wasm_output(
 /// the user's attribute (their callback), and the required modules for this module,
 /// create an output that is ready to be passed into wasm_type_gen's compilation helper
 pub fn get_wasm_code_to_compile(
+    hira_base_code: String,
     module_name: &str,
+    users_item_name: &str,
     exported_name: &str,
     attr: &TokenStream,
     parsed_wasm_code: File,
     required_hira_mods: Vec<TokenStream>,
     default_cb: Option<String>,
-) -> (String, Option<String>) {
-    let mut add_to_code = LibraryObj::include_in_rs_wasm();
-    add_to_code.push_str(LibraryObj::gen_entrypoint());
-    add_to_code.push_str(WASM_PARSING_TRAIT_STR);
-    add_to_code.push_str(lib_obj_impl());
-    add_to_code.push_str(user_data_impl());
+) -> [(String, String); 3] {
+
+    let module_code = quote! {
+        extern crate hira_base;
+        use hira_base::LibraryObj;
+        use hira_base::UserData;
+
+        #(#required_hira_mods)*
+
+        #parsed_wasm_code
+    };
 
     let mut default_cb_stream = None;
     if let Some(defcb) = default_cb {
         default_cb_stream = TokenStream::from_str(&defcb).ok();
     }
-
     let module_name_ident = format_ident!("{module_name}");
     let exported_name = format_ident!("{exported_name}");
     let users_fn = if let Some(defcb) = default_cb_stream {
@@ -539,21 +544,49 @@ pub fn get_wasm_code_to_compile(
             }
         }
     };
+    let users_code = quote! {
+        extern crate hira_base;
+        extern crate #module_name_ident;
+        use hira_base::LibraryObj;
 
-    let final_wasm_source = quote! {
+        #users_fn
+
+        #[no_mangle]
         pub fn wasm_main(library_obj: &mut LibraryObj) {
             let _ = #module_name_ident::wasm_entrypoint(library_obj, users_fn);
         }
-        mod #module_name_ident {
-            use super::LibraryObj;
-            use super::UserData;
 
-            #(#required_hira_mods)*
-
-            #parsed_wasm_code
+        extern "C" {
+            fn get_entrypoint_alloc_size() -> u32;
+            fn get_entrypoint_data(ptr : * const u8, len : u32);
+            fn set_entrypoint_data(ptr : * const u8, len : u32);
         }
-        #users_fn
+
+        #[no_mangle]
+        pub extern fn wasm_entrypoint() -> u32 {
+            let mut input_obj = unsafe {
+                let len = get_entrypoint_alloc_size() as usize ; let mut data : Vec <
+                u8 > = Vec :: with_capacity(len) ; data.set_len(len) ; let ptr =
+                data.as_ptr() ; let len = data.len() ;
+                get_entrypoint_data(ptr, len as _) ; match LibraryObj ::
+                from_binary_slice(data) { Some(s) => s, None => return 1, }
+            };
+            unsafe {
+                let _ = wasm_main(& mut input_obj) ;
+                let out_data = input_obj.to_binary_slice() ; let ptr =
+                out_data.as_ptr() ; let len = out_data.len() ;
+                set_entrypoint_data(ptr, len as _) ;
+            }
+            0
+        }
     };
 
-    (final_wasm_source.to_string(), Some(add_to_code))
+    let module_code = module_code.to_string();
+    let users_code = users_code.to_string();
+
+    [
+        ("hira_base".to_string(), hira_base_code),
+        (module_name.to_string(), module_code),
+        (users_item_name.to_string(), users_code),
+    ]
 }

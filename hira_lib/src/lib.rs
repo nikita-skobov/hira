@@ -3,7 +3,8 @@ use std::io::Write;
 use std::sync::Mutex;
 use module_loading::HiraModule;
 use toml::Table;
-use wasm_types::{MapEntry, LibraryObj};
+use wasm_type_gen::{WasmIncludeString, WASM_PARSING_TRAIT_STR};
+use wasm_types::{MapEntry, LibraryObj, lib_obj_impl, user_data_impl};
 
 pub mod parsing;
 pub mod module_loading;
@@ -34,6 +35,8 @@ pub struct HiraConfig {
     /// a map of module name to a string containing callback code that should
     /// run prior to any invocation of this module.
     pub default_callbacks: HashMap<String, String>,
+
+    pub hira_base_code: String,
 }
 
 impl HiraConfig {
@@ -42,7 +45,17 @@ impl HiraConfig {
         out.set_directories();
         out.load_cargo_toml();
         out.set_should_do_file_ops();
+        out.set_base_code();
+
         out
+    }
+
+    fn set_base_code(&mut self) {
+        let mut hira_base = LibraryObj::include_in_rs_wasm();
+        hira_base.push_str(WASM_PARSING_TRAIT_STR);
+        hira_base.push_str(lib_obj_impl());
+        hira_base.push_str(user_data_impl());
+        self.hira_base_code = hira_base;
     }
 
     fn set_should_do_file_ops(&mut self) {
@@ -322,6 +335,7 @@ mod e2e_tests {
         conf_cb: impl Fn(&mut HiraConfig),
     ) -> Result<(HiraConfig, TokenStream), TokenStream> {
         let mut conf = HiraConfig::default();
+        conf.set_base_code();
         let (attr, item) = separate_item_and_attr_part(user_code);
         conf.wasm_directory = "./test_out".to_string();
         let module = load_module_from_file_string(&mut conf, "a", module_code.to_string()).expect("test case provided invalid module code");
