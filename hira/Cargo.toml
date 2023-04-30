@@ -5,11 +5,6 @@ edition = "2021"
 
 [dependencies]
 proc-macro2 = "1.0.52"
-syn = { version = "2", features = ["extra-traits"] }
-quote = "1"
-wasm_type_gen = { git = "https://github.com/nikita-skobov/wasm_type_gen", rev = "553ab1d78312bd4b9609703f8482266bb883a207" }
-adler32 = "*"
-toml = "0.7.3"
 hira_lib = { path = "../hira_lib" }
 
 [lib]
