@@ -29,6 +29,14 @@ pub struct LambdaInput {
     /// set to true if a function URL should
     /// be created for this lambda.
     pub use_event_function_url: bool,
+
+    /// set to some if this lambda function should run on a schedule.
+    /// first param is the value, and second param is the units.
+    /// only valid units are `minutes`, `hours`, and `days`.
+    /// the value must be positive and >= 1.
+    /// For example set it to `Some((5, "minutes"))` to have your
+    /// lambda be invoked every 5 minutes
+    pub use_schedule: Option<(u32, String)>,
 }
 
 #[hira::dont_compile]
@@ -104,11 +112,19 @@ impl LambdaInput {
         if self.timeout < 1 || self.timeout > 900 {
             return Some(format!("Invalid timeout {:?}\nMust be between 1 and 900", self.timeout));
         }
+        if let Some((value, unit)) = &self.use_schedule {
+            if unit != "minutes" && unit != "days" && unit != "hours" {
+                return Some(format!("Invalid unit {:?} for use_schedule config\nMust be between either `minutes`, `hours`, or `days`", unit));
+            }
+            if *value < 1 {
+                return Some(format!("Invalid value {:?} for use_schedule config. `value` must be >= 0", value));
+            }
+        }
         None
     }
 
     pub fn output_cfn(&self) -> (String, String, String) {
-        let Self { resource_name, function_name, memory_size, timeout, use_event_function_url, .. } = self;
+        let Self { resource_name, function_name, memory_size, timeout, use_event_function_url, use_schedule, .. } = self;
         let func_name = if function_name.is_empty() {
             "# FunctionName will be auto-generated".into()
         } else {
@@ -164,6 +180,40 @@ r#"    {resource_name}:
             FunctionName: !GetAtt {resource_name}.Arn
             FunctionUrlAuthType: NONE
             Principal: '*'
+"#);
+        }
+        if let Some((time, unit)) = use_schedule {
+            x = format!(r#"{x}    Schedule{resource_name}:
+        Type: AWS::Scheduler::Schedule
+        Properties:
+            FlexibleTimeWindow:
+                Mode: 'OFF'
+            ScheduleExpression: 'rate({time} {unit})'
+            Target:
+                Arn: !GetAtt {resource_name}.Arn
+                RoleArn: !GetAtt ScheduleRole{resource_name}.Arn
+    ScheduleRole{resource_name}:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                - Effect: Allow
+                  Principal:
+                      Service: scheduler.amazonaws.com
+                  Action:
+                  - sts:AssumeRole
+            Policies:
+            - PolicyName: allow_schedule
+              PolicyDocument:
+                  Version: '2012-10-17'
+                  Statement:
+                  - Sid: allowschedule
+                    Effect: Allow
+                    Action:
+                    - lambda:InvokeFunction
+                    Resource:
+                    - !GetAtt {resource_name}.Arn
 "#);
         }
         (x, bucket_param, key_param)
