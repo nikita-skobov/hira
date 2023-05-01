@@ -92,14 +92,8 @@ impl LambdaInput {
         }
     }
     pub fn is_valid(&self) -> Option<String> {
-        if self.resource_name.len() > 255 {
-            return Some(format!("Invalid resource name {:?}\nmust be less than 255 characters", self.resource_name));
-        }
-        if self.resource_name.len() < 1 {
-            return Some(format!("Invalid resource name {:?}\nMust contain at least 1 character", self.resource_name));
-        }
-        if !self.resource_name.chars().all(|c| c.is_ascii_alphanumeric()) {
-            return Some(format!("Invalid resource name {:?}\nMust contain only alphanumeric characters [A-Za-z0-9]", self.resource_name));
+        if let Some(err_msg) = hira_awscfn::verify_resource_name(&self.resource_name) {
+            return Some(err_msg);
         }
         if self.function_name.len() > 64 {
             return Some(format!("Invalid function name {:?}\nMust be at most 64 characters", self.function_name));
