@@ -24,7 +24,7 @@ use syn::{
     Expr, ItemUse, Visibility, token::Pub, ItemMacro, ItemImpl
 };
 
-use crate::{module_loading::HiraModule, wasm_types::{InputType, GlobalVariable}};
+use crate::{module_loading::{HiraModule, HiraModule2}, wasm_types::{InputType, GlobalVariable}};
 
 pub fn default_stream() -> TokenStream {
     compiler_error("Failed to get hira config")
@@ -70,6 +70,53 @@ pub fn iterate_expr_for_strings(
             }
         }
     }
+}
+
+pub fn iterate_mod_def(
+    module: &mut HiraModule2,
+    mod_def: &mut ItemMod,
+    fn_callbacks: &[fn(&mut HiraModule2, &mut ItemFn)],
+    struct_callbacks: &[fn(&mut HiraModule2, &mut ItemStruct)],
+    use_callbacks: &[fn(&mut HiraModule2, &mut ItemUse)],
+    mod_callbacks: &[fn(&mut HiraModule2, &mut ItemMod)],
+) {
+    module.name = get_ident_string(&mod_def.ident);
+
+    let mut default_vec = vec![];
+    let content = mod_def.content.as_mut().map(|x| &mut x.1).unwrap_or(&mut default_vec);
+    for item in content {
+        match item {
+            Item::Fn(x) => {
+                for cb in fn_callbacks {
+                    cb(module, x);
+                }
+            }
+            Item::Mod(x) => {
+                for cb in mod_callbacks {
+                    cb(module, x);
+                }
+            }
+            Item::Struct(x) => {
+                for cb in struct_callbacks {
+                    cb(module, x);
+                }
+            }
+            Item::Use(x) => {
+                for cb in use_callbacks {
+                    cb(module, x);
+                }
+            }
+            _ => {},
+        }
+    }
+
+    module.contents = mod_def.to_token_stream().to_string();
+}
+
+pub fn get_ident_string(id: &Ident) -> String {
+    let mut s = id.to_string();
+    remove_surrounding_quotes(&mut s);
+    s
 }
 
 /// iterates over a file, calls provided callbacks which can modify the
@@ -245,6 +292,12 @@ pub fn set_visibility(vis: &mut Visibility, is_pub: bool) {
         }
         _ => {}
     }
+}
+
+pub fn parse_as_module_item(stream: TokenStream) -> Result<ItemMod, TokenStream> {
+    let mod_def = syn::parse2::<ItemMod>(stream)
+        .map_err(|e| compiler_error(&format!("Failed to parse as ItemMod. Hira expects modules to be only applied to rust modules\n{:?}", e)))?;
+    Ok(mod_def)
 }
 
 pub fn get_input_type(item: proc_macro2::TokenStream) -> Option<InputType> {

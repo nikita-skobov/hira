@@ -44,6 +44,36 @@ pub struct HiraModule {
     pub entrypoint_fn: Option<String>, // syn::Item::Fn
 }
 
+#[derive(Default)]
+pub struct HiraModule2 {
+    pub name: String,
+    pub contents: String,
+    pub config_fn_signature: Option<String>,
+    pub input_struct: String,
+    /// List of names of fields + module names that this
+    /// module depends on. For example can be a single module
+    /// and all of its dependencies "use X::*", or can be
+    /// specific fields such as "use X::{Y, Z}". key is the name of the module,
+    /// values are the list of fields from that module. if we find
+    /// "use X::*;" and "use X::{Y, Z}", we only use the "*" import.
+    /// modules that specify "use X"
+    /// Failure to resolve a dependency results in a compilation failure
+    /// and a recommendation to use the hira compiler tool instead.
+    /// example: if X comes after this current module, then hira in proc-macro
+    /// mode cannot know anything about X, and therefore fails.
+    pub dependencies: HashMap<String, Vec<String>>,
+    /// List of names of fields that this module outputs to be
+    /// used by other modules.
+    /// can either be individual items inside
+    /// "pub mod outputs { ... }"
+    /// or "pub use other_crate::outputs::*"
+    /// Outputs must be statically defined, ie: specific fields w/ names and types
+    /// therefore something like "use X::*" must ensure that X can be resolved at
+    /// the time we are processing this module, failure to resolve results in
+    /// a compilation failure
+    pub outputs: Vec<String>,
+}
+
 impl Default for HiraModule {
     fn default() -> Self {
         Self {
@@ -759,6 +789,41 @@ pub fn load_modules_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<
     }
     Ok(out)
 }
+
+/// corresponds to the main hira_mod! macro
+pub fn hira_mod2(mut stream: TokenStream, mut _attr: TokenStream) -> TokenStream {
+    let mut out = Err(default_stream());
+    let out_ref = &mut out;
+    use_hira_config(|conf| {
+        let stream = std::mem::take(&mut stream);
+        // let attr = std::mem::take(&mut attr);
+        *out_ref = hira_mod2_inner(conf, stream);
+    });
+    match out {
+        Ok(o) => o,
+        Err(e) => e,
+    }
+}
+
+pub fn hira_mod2_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<TokenStream, TokenStream> {
+
+    todo!()
+}
+
+pub fn parse_module_from_stream(stream: TokenStream) -> Result<(), TokenStream> {
+    let mut mod_def = parse_as_module_item(stream)?;
+    let mut hira_mod = HiraModule2::default();
+    iterate_mod_def(
+        &mut hira_mod,
+        &mut mod_def,
+        &[],
+        &[],
+        &[],
+        &[],
+    );
+    Ok(())
+}
+
 
 #[cfg(test)]
 mod tests {
