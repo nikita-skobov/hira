@@ -7,3 +7,4 @@ edition = "2021"
 [dependencies]
 registry_wildcard = { path = "../registry_wildcard" }
 hira = { path = "../hira" }
+serde = { version = "*", features = ["derive"] }
