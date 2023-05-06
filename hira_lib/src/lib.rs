@@ -211,8 +211,9 @@ impl HiraConfig {
         module_name: &str,
         lib_obj: &mut LibraryObj,
     ) -> Result<(), String> {
-        let map_entry_data = to_map_entry(std::mem::take(&mut lib_obj.shared_output_data));
-        self.output_shared_files(module_name, map_entry_data)
+        // let map_entry_data = to_map_entry(std::mem::take(&mut lib_obj.shared_output_data));
+        // self.output_shared_files(module_name, map_entry_data)
+        Ok(())
     }
 
     fn save_shared_data(&mut self, data: HashMap<String, String>) {

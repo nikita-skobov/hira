@@ -738,36 +738,36 @@ pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: To
     );
 
     let mut pass_this = LibraryObj::new();
-    pass_this.user_data = (&input_type).into();
-    pass_this.dependencies = Vec::from_iter(conf.known_cargo_dependencies.clone());
-    pass_this.shared_state = conf.shared_data.clone();
-    pass_this.crate_name = std::env::var("CARGO_CRATE_NAME").unwrap_or("".into());
+    // pass_this.user_data = (&input_type).into();
+    // pass_this.dependencies = Vec::from_iter(conf.known_cargo_dependencies.clone());
+    // pass_this.shared_state = conf.shared_data.clone();
+    // pass_this.crate_name = std::env::var("CARGO_CRATE_NAME").unwrap_or("".into());
     let mut lib_obj = get_wasm_output(
         &conf.wasm_directory,
         &code,
         &pass_this
     ).unwrap_or_default();
 
-    if !lib_obj.compiler_error_message.is_empty() {
-        // TODO: currently we just add a compile_error to the end of the stream..
-        // in the future maybe search for a string, and replace the right hand side to compile_error
-        // so that we can put it on a specific line
-        let err = compiler_error(&lib_obj.compiler_error_message);
-        attr.extend([err]);
-    }
+    // if !lib_obj.compiler_error_message.is_empty() {
+    //     // TODO: currently we just add a compile_error to the end of the stream..
+    //     // in the future maybe search for a string, and replace the right hand side to compile_error
+    //     // so that we can put it on a specific line
+    //     let err = compiler_error(&lib_obj.compiler_error_message);
+    //     attr.extend([err]);
+    // }
 
-    let mut add_after = vec![];
-    for s in lib_obj.add_code_after.drain(..) {
-        let tokens = TokenStream::from_str(&s).map_err(|e| {
-            compiler_error(&format!("Module '{}' produced invalid after_code tokens:\n{}\nError:\n{:?}", module_name, s, e))
-        })?;
-        add_after.push(tokens);
-    }
+    // let mut add_after = vec![];
+    // for s in lib_obj.add_code_after.drain(..) {
+    //     let tokens = TokenStream::from_str(&s).map_err(|e| {
+    //         compiler_error(&format!("Module '{}' produced invalid after_code tokens:\n{}\nError:\n{:?}", module_name, s, e))
+    //     })?;
+    //     add_after.push(tokens);
+    // }
 
     conf.do_file_ops(&module_name, &mut lib_obj).map_err(|e| {
         compiler_error(&e)
     })?;
-    conf.save_shared_data(std::mem::take(&mut lib_obj.shared_state));
+    // conf.save_shared_data(std::mem::take(&mut lib_obj.shared_state));
     input_type.apply_library_obj_changes(lib_obj, &module_name);
     let item = input_type.back_to_stream(&format!("_b{hash}"));
 
@@ -779,7 +779,7 @@ pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: To
         }
         #item
 
-        #(#add_after)*
+        // #(#add_after)*
     };
 
     Ok(user_out)

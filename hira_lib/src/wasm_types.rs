@@ -86,21 +86,21 @@ pub struct L0KvReader {
 
 #[derive(WasmTypeGen, Debug, Default)]
 pub struct LibraryObj {
-    pub compiler_error_message: String,
-    pub add_code_after: Vec<String>,
-    /// crate_name is read only. modifying this has no effect.
-    pub crate_name: String,
-    pub user_data: UserData,
-    pub shared_output_data: Vec<SharedOutputEntry>,
-    /// a shared key/value store for accessing data across wasm module invocations.
-    /// this can be both used by you as a module writer, as well as optionally exposing
-    /// this to users by providing this data in your exported struct.
-    /// NOTE: this is append only + read. a wasm module cannot modify/delete existing key/value pairs
-    /// but it CAN read them, as well as append new ones.
-    pub shared_state: std::collections::HashMap<String, String>,
-    /// names of dependencies that the user has specified in their Cargo.toml.
-    /// NOTE: these are read only.
-    pub dependencies: Vec<String>,
+    // pub compiler_error_message: String,
+    // pub add_code_after: Vec<String>,
+    // /// crate_name is read only. modifying this has no effect.
+    // pub crate_name: String,
+    // pub user_data: UserData,
+    // pub shared_output_data: Vec<SharedOutputEntry>,
+    // /// a shared key/value store for accessing data across wasm module invocations.
+    // /// this can be both used by you as a module writer, as well as optionally exposing
+    // /// this to users by providing this data in your exported struct.
+    // /// NOTE: this is append only + read. a wasm module cannot modify/delete existing key/value pairs
+    // /// but it CAN read them, as well as append new ones.
+    // pub shared_state: std::collections::HashMap<String, String>,
+    // /// names of dependencies that the user has specified in their Cargo.toml.
+    // /// NOTE: these are read only.
+    // pub dependencies: Vec<String>,
 
     // everything below is a level0 capability for modulesV2:
     pub kv_reader: L0KvReader,
@@ -162,43 +162,43 @@ impl InputType {
 
 impl InputType {
     pub fn apply_library_obj_changes(&mut self, lib_obj: LibraryObj, wasm_module_name: &str) {
-        let user_data = lib_obj.user_data;
-        match (self, user_data) {
-            (InputType::Struct(x), UserData::Struct { name, is_pub, .. }) => {
-                rename_ident(&mut x.ident, &name);
-                set_visibility(&mut x.vis, is_pub);
-            }
-            (InputType::Function(x), UserData::Function { name, is_pub, .. }) => {
-                rename_ident(&mut x.sig.ident, &name);
-                set_visibility(&mut x.vis, is_pub);
-            }
-            (InputType::GlobalVar(GlobalVariable::Constant(x)), UserData::GlobalVariable { name, is_pub, .. }) => {
-                rename_ident(&mut x.ident, &name);
-                set_visibility(&mut x.vis, is_pub);
-            }
-            (InputType::GlobalVar(GlobalVariable::Static(x)), UserData::GlobalVariable { name, is_pub, .. }) => {
-                rename_ident(&mut x.ident, &name);
-                set_visibility(&mut x.vis, is_pub);
-            }
-            (InputType::Module(x), UserData::Module { name, is_pub, append_to_body, .. }) => {
-                rename_ident(&mut x.ident, &name);
-                if let Some((_, content)) = &mut x.content {
-                    for line in append_to_body {
-                        let s = match TokenStream::from_str(&line) {
-                            Ok(s) => s,
-                            Err(e) => panic!("Module {wasm_module_name} attempted to add an invalid line to mod def {name}\nError:\n{:?}", e),
-                        };
-                        let c = match syn::parse2::<Item>(s) {
-                            Ok(s) => s,
-                            Err(e) => panic!("Module {wasm_module_name} attempted to add an invalid line to mod def {name}\nError:\n{:?}", e),
-                        };
-                        content.push(c);
-                    }
-                }
-                set_visibility(&mut x.vis, is_pub);
-            }
-            _ => {}
-        }
+        // let user_data = lib_obj.user_data;
+        // match (self, user_data) {
+        //     (InputType::Struct(x), UserData::Struct { name, is_pub, .. }) => {
+        //         rename_ident(&mut x.ident, &name);
+        //         set_visibility(&mut x.vis, is_pub);
+        //     }
+        //     (InputType::Function(x), UserData::Function { name, is_pub, .. }) => {
+        //         rename_ident(&mut x.sig.ident, &name);
+        //         set_visibility(&mut x.vis, is_pub);
+        //     }
+        //     (InputType::GlobalVar(GlobalVariable::Constant(x)), UserData::GlobalVariable { name, is_pub, .. }) => {
+        //         rename_ident(&mut x.ident, &name);
+        //         set_visibility(&mut x.vis, is_pub);
+        //     }
+        //     (InputType::GlobalVar(GlobalVariable::Static(x)), UserData::GlobalVariable { name, is_pub, .. }) => {
+        //         rename_ident(&mut x.ident, &name);
+        //         set_visibility(&mut x.vis, is_pub);
+        //     }
+        //     (InputType::Module(x), UserData::Module { name, is_pub, append_to_body, .. }) => {
+        //         rename_ident(&mut x.ident, &name);
+        //         if let Some((_, content)) = &mut x.content {
+        //             for line in append_to_body {
+        //                 let s = match TokenStream::from_str(&line) {
+        //                     Ok(s) => s,
+        //                     Err(e) => panic!("Module {wasm_module_name} attempted to add an invalid line to mod def {name}\nError:\n{:?}", e),
+        //                 };
+        //                 let c = match syn::parse2::<Item>(s) {
+        //                     Ok(s) => s,
+        //                     Err(e) => panic!("Module {wasm_module_name} attempted to add an invalid line to mod def {name}\nError:\n{:?}", e),
+        //                 };
+        //                 content.push(c);
+        //             }
+        //         }
+        //         set_visibility(&mut x.vis, is_pub);
+        //     }
+        //     _ => {}
+        // }
     }
 }
 
@@ -351,89 +351,94 @@ impl LibraryObj {
     #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
-            compiler_error_message: Default::default(),
-            add_code_after: Default::default(),
-            crate_name: Default::default(),
-            user_data: UserData::new(),
-            shared_output_data: Default::default(),
-            shared_state: Default::default(),
-            dependencies: Default::default(),
+            // compiler_error_message: Default::default(),
+            // add_code_after: Default::default(),
+            // crate_name: Default::default(),
+            // user_data: UserData::new(),
+            // shared_output_data: Default::default(),
+            // shared_state: Default::default(),
+            // dependencies: Default::default(),
 
             kv_reader: L0KvReader::new(),
         }
     }
-    #[allow(dead_code)]
-    pub fn compile_error(&mut self, err_msg: &str) {
-        self.compiler_error_message = err_msg.into();
-    }
-    /// a simple utility for generating 'hashes' based on some arbitrary input.
-    /// Read more about adler32 here: https://en.wikipedia.org/wiki/Adler-32
-    #[allow(dead_code)]
-    pub fn adler32(&mut self, data: &[u8]) -> u32 {
-        let mod_adler = 65521;
-        let mut a: u32 = 1;
-        let mut b: u32 = 0;
-        for &byte in data {
-            a = (a + byte as u32) % mod_adler;
-            b = (b + a) % mod_adler;
-        }
-        (b << 16) | a
-    }
-    /// given a file name (no paths. the file will appear in ./wasmgen/{filename})
-    /// and a label, and a line (string) append to the file. create the file if it doesnt exist.
-    /// the label is used to sort lines between your wasm module and other invocations.
-    /// the label is also embedded to the file. so if you are outputing to a .sh file, for example,
-    /// your label should start with '#'. The labels are sorted alphabetically.
-    /// Example:
-    /// ```rust,ignore
-    /// # wasm module 1 does:
-    /// append_to_file("hello.txt", "b", "line1");
-    /// # wasm module 2 does:
-    /// append_to_file("hello.txt", "b", "line2");
-    /// # wasm module 3 does:
-    /// append_to_file("hello.txt", "a", "line3");
-    /// # wasm moudle 4 does:
-    /// append_to_file("hello.txt", "a", "line4");
-    /// 
-    /// # the output:
-    /// a
-    /// line3
-    /// line4
-    /// b
-    /// line1
-    /// line2
-    /// ```
-    #[allow(dead_code)]
-    pub fn append_to_file(&mut self, name: &str, label: &str, line: String) {
-        self.shared_output_data.push(SharedOutputEntry { label: label.into(), line, filename: name.into(), unique: false, after: None });
-    }
+    // #[allow(dead_code)]
+    // pub fn compile_error(&mut self, err_msg: &str) {
+    //     self.compiler_error_message = err_msg.into();
+    // }
+    // /// a simple utility for generating 'hashes' based on some arbitrary input.
+    // /// Read more about adler32 here: https://en.wikipedia.org/wiki/Adler-32
+    // #[allow(dead_code)]
+    // pub fn adler32(&mut self, data: &[u8]) -> u32 {
+    //     let mod_adler = 65521;
+    //     let mut a: u32 = 1;
+    //     let mut b: u32 = 0;
+    //     for &byte in data {
+    //         a = (a + byte as u32) % mod_adler;
+    //         b = (b + a) % mod_adler;
+    //     }
+    //     (b << 16) | a
+    // }
+    // /// given a file name (no paths. the file will appear in ./wasmgen/{filename})
+    // /// and a label, and a line (string) append to the file. create the file if it doesnt exist.
+    // /// the label is used to sort lines between your wasm module and other invocations.
+    // /// the label is also embedded to the file. so if you are outputing to a .sh file, for example,
+    // /// your label should start with '#'. The labels are sorted alphabetically.
+    // /// Example:
+    // /// ```rust,ignore
+    // /// # wasm module 1 does:
+    // /// append_to_file("hello.txt", "b", "line1");
+    // /// # wasm module 2 does:
+    // /// append_to_file("hello.txt", "b", "line2");
+    // /// # wasm module 3 does:
+    // /// append_to_file("hello.txt", "a", "line3");
+    // /// # wasm moudle 4 does:
+    // /// append_to_file("hello.txt", "a", "line4");
+    // /// 
+    // /// # the output:
+    // /// a
+    // /// line3
+    // /// line4
+    // /// b
+    // /// line1
+    // /// line2
+    // /// ```
+    // #[allow(dead_code)]
+    // pub fn append_to_file(&mut self, name: &str, label: &str, line: String) {
+    //     self.shared_output_data.push(SharedOutputEntry { label: label.into(), line, filename: name.into(), unique: false, after: None });
+    // }
 
-    /// same as append_to_file, but the line will be unique within the label
-    #[allow(dead_code)]
-    pub fn append_to_file_unique(&mut self, name: &str, label: &str, line: String) {
-        self.shared_output_data.push(SharedOutputEntry { label: label.into(), line, filename: name.into(), unique: true, after: None });
-    }
+    // /// same as append_to_file, but the line will be unique within the label
+    // #[allow(dead_code)]
+    // pub fn append_to_file_unique(&mut self, name: &str, label: &str, line: String) {
+    //     self.shared_output_data.push(SharedOutputEntry { label: label.into(), line, filename: name.into(), unique: true, after: None });
+    // }
 
-    /// like append_to_file, but given a search string, find that search string in that label
-    /// and then append the `after` portion immediately after the search string. Example:
-    /// ```rust,ignore
-    /// // "hello " doesnt exist yet, so the whole "hello , and also my friend Tim!" gets added
-    /// append_to_line("hello.txt", "a", "hello ", ", and also my friend Tim!");
-    /// append_to_line("hello.txt", "a", "hello ", "world"); 
-    /// 
-    /// # the output:
-    /// hello world, and also my friend Tim!
-    /// ```
-    #[allow(dead_code)]
-    pub fn append_to_line(&mut self, name: &str, label: &str, search_str: String, after: String) {
-        self.shared_output_data.push(SharedOutputEntry { label: label.into(), line: search_str, filename: name.into(), unique: false, after: Some(after) });
-    }
+    // /// like append_to_file, but given a search string, find that search string in that label
+    // /// and then append the `after` portion immediately after the search string. Example:
+    // /// ```rust,ignore
+    // /// // "hello " doesnt exist yet, so the whole "hello , and also my friend Tim!" gets added
+    // /// append_to_line("hello.txt", "a", "hello ", ", and also my friend Tim!");
+    // /// append_to_line("hello.txt", "a", "hello ", "world"); 
+    // /// 
+    // /// # the output:
+    // /// hello world, and also my friend Tim!
+    // /// ```
+    // #[allow(dead_code)]
+    // pub fn append_to_line(&mut self, name: &str, label: &str, search_str: String, after: String) {
+    //     self.shared_output_data.push(SharedOutputEntry { label: label.into(), line: search_str, filename: name.into(), unique: false, after: Some(after) });
+    // }
 }
 
 #[output_and_stringify_basic_const(KV_IMPL)]
 impl L0KvReader {
     pub fn new() -> Self {
         Self { data: Default::default() }
+    }
+
+    // TODO: this capability is only supposed to be allowed to read...
+    pub fn insert(&mut self, key: String, val: String) {
+        self.data.insert(key, val);
     }
 }
 
