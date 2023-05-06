@@ -5,7 +5,7 @@ use proc_macro2::TokenStream;
 use quote::{quote, format_ident, ToTokens};
 use syn::{parse_file, ItemUse};
 
-use crate::parsing::{remove_surrounding_quotes, get_input_type, parse_callback_required_module, extract_default_attr};
+use crate::parsing::{remove_surrounding_quotes, get_input_type, parse_callback_required_module, extract_default_attr, parse_as_module_item, iterate_mod_def, get_ident_string};
 use crate::wasm_types::*;
 use wasm_type_gen::*;
 
@@ -48,7 +48,7 @@ pub struct HiraModule {
 pub struct HiraModule2 {
     pub name: String,
     pub contents: String,
-    pub config_fn_signature: Option<String>,
+    pub config_fn_signature_inputs: Vec<String>,
     pub input_struct: String,
     /// List of names of fields + module names that this
     /// module depends on. For example can be a single module
@@ -61,7 +61,7 @@ pub struct HiraModule2 {
     /// and a recommendation to use the hira compiler tool instead.
     /// example: if X comes after this current module, then hira in proc-macro
     /// mode cannot know anything about X, and therefore fails.
-    pub dependencies: HashMap<String, Vec<String>>,
+    pub dependencies: HashMap<String, Result<Vec<String>, String>>,
     /// List of names of fields that this module outputs to be
     /// used by other modules.
     /// can either be individual items inside
@@ -71,7 +71,22 @@ pub struct HiraModule2 {
     /// therefore something like "use X::*" must ensure that X can be resolved at
     /// the time we are processing this module, failure to resolve results in
     /// a compilation failure
-    pub outputs: Vec<String>,
+    pub outputs: Vec<(String, String)>,
+}
+
+impl HiraModule2 {
+    pub fn get_dependencies(&self, s: &str) -> Option<Vec<String>> {
+        let entry = self.dependencies.get(s)?;
+        match entry {
+            // this is a renamed entry
+            Err(renamed) => {
+                self.get_dependencies(&renamed)
+            }
+            Ok(out) => {
+                Some(out.clone())
+            }
+        }
+    }
 }
 
 impl Default for HiraModule {
@@ -805,29 +820,220 @@ pub fn hira_mod2(mut stream: TokenStream, mut _attr: TokenStream) -> TokenStream
     }
 }
 
-pub fn hira_mod2_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<TokenStream, TokenStream> {
+pub fn hira_mod2_inner(_conf: &mut HiraConfig, stream: TokenStream) -> Result<TokenStream, TokenStream> {
+    let _module = parse_module_from_stream(stream.clone())?;
+    // TODO:
+    // - verify module
+    // - add to the config
+    // - run the module as wasm + dependencies
 
-    todo!()
+    Ok(stream)
 }
 
-pub fn parse_module_from_stream(stream: TokenStream) -> Result<(), TokenStream> {
+pub fn set_config_fn_sig(module: &mut HiraModule2, item: &mut syn::ItemFn) {
+    let sig = &item.sig;
+    let fn_name = get_ident_string(&sig.ident);
+    if fn_name != "config" { return }
+    for input in &sig.inputs {
+        let push_s = match input {
+            syn::FnArg::Receiver(_) => "self".to_string(),
+            syn::FnArg::Typed(x) => {
+                x.ty.to_token_stream().to_string()
+            }
+        };
+        module.config_fn_signature_inputs.push(push_s);
+    }
+}
+
+pub fn set_input_item_struct(module: &mut HiraModule2, item: &mut syn::ItemStruct) {
+    let struct_name = get_ident_string(&item.ident);
+    if struct_name == "Input" {
+        module.input_struct = item.to_token_stream().to_string();
+    }
+}
+
+pub fn set_dep_inner(deps: &mut HashMap<String, Result<Vec<String>, String>>, dep_name: &String, field: String) {
+    match deps.get_mut(dep_name) {
+        Some(Ok(existing_vec)) => {
+            match (existing_vec.contains(&"*".to_string()), field == "*") {
+                // the existing vec is already just *, so ignore
+                (true, true) => {},
+                // existing vec is already *, but we want to add
+                // something that isn't *. ignore, because * overrides everything else
+                (true, false) => {},
+                // we want to set existing vec to * and override existing entries
+                (false, true) => {
+                    existing_vec.clear();
+                    existing_vec.push(field);
+                }
+                // not using wildcards, just push
+                (false, false) => {
+                    existing_vec.push(field);
+                }
+            }
+        }
+        None => {
+            deps.insert(dep_name.to_string(), Ok(vec![field]));
+        }
+        // should not be possible
+        _ => {}
+    }
+}
+
+pub fn set_dep(deps: &mut HashMap<String, Result<Vec<String>, String>>, dep_name: &String, renamed: &String, field: String) {
+    if dep_name != renamed {
+        deps.insert(renamed.to_string(), Err(dep_name.to_string()));
+    }
+    set_dep_inner(deps, dep_name, field);
+}
+
+pub fn set_dependencies_recursively(deps: &mut HashMap<String, Result<Vec<String>, String>>, past_names: &Vec<String>, tree: &syn::UseTree) {
+    match (past_names.last(), tree) {
+        (Some(s), syn::UseTree::Name(n)) => {
+            let name = get_ident_string(&n.ident);
+            if name == "outputs" {
+                set_dep(deps, s, s, "*".to_string());
+            } else if s == "outputs" {
+                // check if outputs is the name right before this one, and if so
+                // then we want to add a specific item name
+                let len = past_names.len();
+                if len > 1 {
+                    let second_to_last_index = len - 2;
+                    if let Some(second_to_last) = past_names.get(second_to_last_index) {
+                        set_dep(deps, second_to_last, second_to_last, name);
+                    }
+                }
+            }
+        }
+        (Some(s), syn::UseTree::Rename(n)) => {
+            let renamed = get_ident_string(&n.rename);
+            let name = get_ident_string(&n.ident);
+            if name == "outputs" {
+                set_dep(deps, s, &renamed, "*".to_string());
+            }
+        }
+        (_, syn::UseTree::Group(g)) => {
+            for item in &g.items {
+                set_dependencies_recursively(deps, past_names, item);
+            }
+        }
+        (_, syn::UseTree::Path(p)) => {
+            let mut names = past_names.clone();
+            names.push(get_ident_string(&p.ident));
+            set_dependencies_recursively(deps, &names, &p.tree);
+        }
+        (_, syn::UseTree::Glob(_)) => {
+            for last_name in past_names.iter().rev() {
+                if last_name != "outputs" {
+                    set_dep(deps, last_name, last_name, "*".to_string());
+                    break;
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// TODO: how to differentiate between hira dependencies like another hira module
+/// and a normal crate/module that this module wants to use...
+pub fn set_dependencies(module: &mut HiraModule2, item: &mut syn::ItemUse) {
+    let mut deps = std::mem::take(&mut module.dependencies);
+    let past_names = vec![];
+    set_dependencies_recursively(&mut deps, &past_names, &item.tree);
+    module.dependencies = deps;
+}
+
+pub fn set_outputs(module: &mut HiraModule2, item: &mut syn::ItemMod) {
+    let name = get_ident_string(&item.ident);
+    if name != "outputs" { return; }
+    let mut default_vec = vec![];
+    for item in item.content.as_mut().map(|x| &mut x.1).unwrap_or(&mut default_vec) {
+        // TODO: for now we only allow constants,
+        // but in the future to support level 2 module wrapping, need to be
+        // able to support something like "mod outputs { pub use other_module::outputs::*; }"
+        if let syn::Item::Const(c) = item {
+            let name = get_ident_string(&c.ident);
+            // TODO: actually check the value and type...
+            // currently we just assume its a string and store as such.
+            let mut value = c.expr.to_token_stream().to_string();
+            remove_surrounding_quotes(&mut value);
+            module.outputs.push((name, value));
+        }
+    }
+}
+
+pub fn parse_module_from_stream(stream: TokenStream) -> Result<HiraModule2, TokenStream> {
     let mut mod_def = parse_as_module_item(stream)?;
     let mut hira_mod = HiraModule2::default();
     iterate_mod_def(
         &mut hira_mod,
         &mut mod_def,
-        &[],
-        &[],
-        &[],
-        &[],
+        &[set_config_fn_sig],
+        &[set_input_item_struct],
+        &[set_dependencies],
+        &[set_outputs],
     );
-    Ok(())
+    Ok(hira_mod)
 }
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn basic_mod2_parsing_works() {
+        let code = r#"
+        mod hello_world {
+            // these should be represented the same way:
+            use crate::dependency_b::outputs;
+            use crate::dependency_a::outputs::*;
+            // groups work:
+            use crate::{
+                // xyz should resolve to somedep1
+                somedep1::outputs as xyz,
+                // somedep2 should have explicit outputs A1, and A2
+                somedep2::{
+                    outputs::A1,
+                    outputs::A2,
+                    // should not allow renaming specific fields
+                    outputs::A3 as somethingelse,
+                }
+            };
+            // ignored:
+            use some_library;
+
+
+            pub struct Input {
+                pub a: u32,
+            }
+
+            mod outputs {
+                pub const HEY: &'static str = "dsa";
+            }
+
+            pub fn config(input: &mut Input) {
+
+            }
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        assert_eq!(module.name, "hello_world");
+        assert_eq!(module.config_fn_signature_inputs.len(), 1);
+        assert_eq!(module.config_fn_signature_inputs[0], "& mut Input");
+        // println!("{:#?}", module.dependencies);
+        assert!(module.dependencies.contains_key("dependency_a"));
+        assert!(module.dependencies.contains_key("dependency_b"));
+        assert!(module.dependencies.contains_key("somedep1"));
+        assert!(module.dependencies.contains_key("xyz"));
+        assert!(module.dependencies.contains_key("somedep2"));
+        assert!(!module.dependencies.contains_key("some_library"));
+        assert_eq!(module.dependencies["somedep2"], Ok(vec!["A1".to_string(), "A2".to_string()]));
+        assert!(module.input_struct.contains("pub a"));
+        assert!(module.input_struct.contains("pub struct Input"));
+        assert_eq!(module.outputs[0], ("HEY".to_string(), "dsa".to_string()));
+    }
 
     #[test]
     fn can_remove_recursive_macro() {
