@@ -80,6 +80,11 @@ pub struct SharedOutputEntry {
 }
 
 #[derive(WasmTypeGen, Debug, Default)]
+pub struct L0KvReader {
+    data: std::collections::HashMap<String, String>,
+}
+
+#[derive(WasmTypeGen, Debug, Default)]
 pub struct LibraryObj {
     pub compiler_error_message: String,
     pub add_code_after: Vec<String>,
@@ -96,6 +101,9 @@ pub struct LibraryObj {
     /// names of dependencies that the user has specified in their Cargo.toml.
     /// NOTE: these are read only.
     pub dependencies: Vec<String>,
+
+    // everything below is a level0 capability for modulesV2:
+    pub kv_reader: L0KvReader,
 }
 
 
@@ -350,6 +358,8 @@ impl LibraryObj {
             shared_output_data: Default::default(),
             shared_state: Default::default(),
             dependencies: Default::default(),
+
+            kv_reader: L0KvReader::new(),
         }
     }
     #[allow(dead_code)]
@@ -420,6 +430,13 @@ impl LibraryObj {
     }
 }
 
+#[output_and_stringify_basic_const(KV_IMPL)]
+impl L0KvReader {
+    pub fn new() -> Self {
+        Self { data: Default::default() }
+    }
+}
+
 #[output_and_stringify_basic_const(USER_DATA_IMPL)]
 impl UserData {
     #[allow(dead_code)]
@@ -463,6 +480,10 @@ pub fn user_data_impl() -> &'static str {
 
 pub fn lib_obj_impl() -> &'static str {
     LIBRARY_OBJ_IMPL
+}
+
+pub fn kv_obj_impl() -> &'static str {
+    KV_IMPL
 }
 
 pub fn to_map_entry(data: Vec<SharedOutputEntry>) -> Vec<MapEntry<MapEntry<(bool, String, Option<String>)>>> {

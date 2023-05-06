@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use module_loading::HiraModule;
 use toml::Table;
 use wasm_type_gen::{WasmIncludeString, WASM_PARSING_TRAIT_STR};
-use wasm_types::{MapEntry, LibraryObj, lib_obj_impl, user_data_impl};
+use wasm_types::{MapEntry, LibraryObj, lib_obj_impl, user_data_impl, kv_obj_impl};
 
 pub mod parsing;
 pub mod module_loading;
@@ -55,6 +55,7 @@ impl HiraConfig {
         hira_base.push_str(WASM_PARSING_TRAIT_STR);
         hira_base.push_str(lib_obj_impl());
         hira_base.push_str(user_data_impl());
+        hira_base.push_str(kv_obj_impl());
         self.hira_base_code = hira_base;
     }
 

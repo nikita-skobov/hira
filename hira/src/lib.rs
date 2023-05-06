@@ -17,6 +17,13 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
     hira_lib::module_loading::run_module(item, attr).into()
 }
 
+#[proc_macro_attribute]
+pub fn hira_mod2(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let item = proc_macro2::TokenStream::from(item);
+    let attr = proc_macro2::TokenStream::from(attr);
+    hira_lib::module_loading::hira_mod2(item, attr).into()
+}
+
 /// This is a no-op during compilation.
 /// its only necessary for wasm evaluation to know
 /// which parts of the code to not compile into wasm
