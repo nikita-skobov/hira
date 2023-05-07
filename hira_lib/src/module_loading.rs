@@ -119,6 +119,11 @@ pub struct HiraModule2 {
     /// tracks actual dependencies required for compiling this as a wasm module.
     /// This field is set after parsing, as it requires verification that modules exist
     pub compile_dependencies: HashSet<DependencyTypeName>,
+
+    /// if this is a level3 module, then we set this field to be the name of the level2
+    /// module that this module referenced in its config function
+    pub lvl3_module_depends_on: Option<String>,
+
     /// List of names of fields that this module outputs to be
     /// used by other modules.
     /// must be individual items inside
@@ -143,6 +148,29 @@ impl HiraModule2 {
                 Some(out.clone())
             }
         }
+    }
+
+    pub fn assert_level_3_and_set_depends_on(&mut self) -> Result<(), TokenStream> {
+        let mut has_l2_dep = None;
+        for dep in self.compile_dependencies.iter() {
+            match dep {
+                DependencyTypeName::Mod1Or2(x) => {
+                    has_l2_dep = Some(x);
+                }
+                DependencyTypeName::Library(x) => {
+                    return Err(compiler_error(&format!("Detected {} as {:?}, but found it attempting to use {} in its config function. Only Level1 modules are allowed to use Level0 functionality in the config function", self.name, self.level, x)));
+                }
+            }
+        }
+        let l2_dep_name = has_l2_dep
+            .ok_or_else(|| {
+                compiler_error(&format!("Detected {} as {:?}, but failed to find a level2 module's input in the config function signature", self.name, self.level))
+            })?;
+        if self.config_fn_signature_inputs.len() != 1 {
+            return Err(compiler_error(&format!("Detected {} as {:?}, but its config function signature has more than 1 input", self.name, self.level)));
+        }
+        self.lvl3_module_depends_on = Some(l2_dep_name.to_string());
+        Ok(())
     }
 
     pub fn verify_config_signature(&mut self) -> Result<(), TokenStream> {
@@ -172,17 +200,18 @@ impl HiraModule2 {
             }
         }
         // if any of the compile_dependencies start with L0, then this is a L1 module
-        // if this module has any exports, its a L3 module.
-        // it can also be an L3 module if it doesnt have an input struct
-        // if this module has more than 1 dependency, and its not an L1 module, then
-        // its a L2 module.
-        // otherwise, we assume L2
+        //    (because only L1 modules are allowed to use L0 capabilities)
+        // if this has more than 1 signature input, and its not a L1 module, then it is a L2 module
+        //    (because we know its not an L1 module, and L3 modules can only have 1 signature input)
+        // if this module does not have an input struct, it MUST be a L3 module
+        //    (because all other types of modules must specify their input shape)
+        // otherwise we default to assume its level2, but we perform validation afterwards
         if has_l0_deps {
             self.level = ModuleLevel::Level1;
-        } else if self.outputs.len() > 0 || self.input_struct.is_empty() {
-            self.level = ModuleLevel::Level3;
         } else if self.config_fn_signature_inputs.len() > 1 {
             self.level = ModuleLevel::Level2;
+        } else if self.input_struct.is_empty() {
+            self.level = ModuleLevel::Level3;
         } else {
             self.level = ModuleLevel::Level2;
         }
@@ -191,6 +220,10 @@ impl HiraModule2 {
             return Err(compiler_error(
                 &format!("Detected module {} as {:?}, but it is not marked public. Level1 and Level2 modules must be public", self.name, self.level)
             ));
+        }
+
+        if self.level == ModuleLevel::Level3 {
+            self.assert_level_3_and_set_depends_on()?;
         }
 
         // TODO: add capability checks, eg: module level2s arent allowed to use outputs,
@@ -202,6 +235,44 @@ impl HiraModule2 {
         // ensure level3 does not have one.
         // ensure other levels DO have one, and ensure it has a Default method
         // scan its attributes for (Derive(Default)), impl w/ a default() signature, etc.
+
+        // verify the shape of outputs is valid:
+        if !self.outputs.is_empty() {
+            match self.level {
+                // its impossible for this to be a level0, but to make the match statement
+                // look nicer im putting it here anyway
+                ModuleLevel::Level1 | ModuleLevel::Level0 => {
+                    return Err(compiler_error(&format!("Detected module {} as {:?}, but it has a `mod outputs` section. Only Level2 and Level3 modules can specify an outputs section", self.name, self.level)));
+                }
+                ModuleLevel::Level2 => {
+                    // ensure L2 modules can only specify specific const outputs
+                    if self.outputs.iter().any(|x| if let OutputType::SpecificConst(_) = x { false } else { true }) {
+                        return Err(compiler_error(&format!("Detected module {} as {:?}, but in its `mod outputs` section there are use statements. Only Level3 modules can specify use statements in its outputs section", self.name, self.level)));
+                    }
+                }
+                ModuleLevel::Level3 => {
+                    // it should be guaranteed at this point that we know the l2 dependency
+                    // but just in case we unwrap w/ default
+                    let default = "".to_string();
+                    let l2_dependency = self.lvl3_module_depends_on.as_ref().unwrap_or(&default);
+                    // ensure L3 modules can only specify use statements
+                    // also ensure that L3 module outputs only depend on 1 level 2 module
+                    // and ensure that this level 2 module is the same one in its input config
+                    for output in self.outputs.iter() {
+                        match output {
+                            OutputType::SpecificConst(_) => {
+                                return Err(compiler_error(&format!("Detected module {} as {:?}, but in its `mod outputs` section there are const statements. Only Level2 modules can specify const statements in its outputs section", self.name, self.level)));
+                            }
+                            OutputType::AllFromModule(mod_name) | OutputType::SpecificFromModule(mod_name, _) => {
+                                if mod_name != l2_dependency {
+                                    return Err(compiler_error(&format!("Detected module {} as {:?}. Its `mod outputs` section contains use statements from other modules. Expected to only see use statements from Level2 module {}, but found {}. Level3 modules can only specify outputs that exist in the corresponding Level2 module", self.name, self.level, l2_dependency, mod_name)));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
@@ -1229,6 +1300,24 @@ mod tests {
         assert!(out.is_err());
         let err = out.err().unwrap().to_string();
         assert!(err.contains("must be public"));
+    }
+
+    #[test]
+    fn mod2_lvl3_outputs_can_only_depend_on_its_corresponding_l2_mod() {
+        let code = r#"
+        mod hello_world {
+            pub mod outputs {
+                use some_other_dep::outputs::*;
+            }
+            pub fn config(input: &mut l2_dep::Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let out = module.verify_config_signature();
+        assert!(out.is_err());
+        let err = out.err().unwrap().to_string();
+        assert!(err.contains("Expected to only see use statements from Level2 module l2_dep, but found some_other_dep"));
     }
 
     #[test]
