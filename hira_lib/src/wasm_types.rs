@@ -539,6 +539,7 @@ pub fn get_wasm_code_to_compile2(
     hira_conf: &HiraConfig,
     hira_module_lvl3: &HiraModule2
 ) -> Result<[(String, String); 3], TokenStream> {
+    let dependency_name = format!("dependencies_{}", hira_module_lvl3.name);
     let mut dependency_mod_defs = vec![];
     let mut dependency_config: Option<DependencyConfig> = None;
     for dep in hira_module_lvl3.compile_dependencies.iter() {
@@ -560,7 +561,8 @@ pub fn get_wasm_code_to_compile2(
         #(#dependency_mod_defs)*
     };
     let users_code = get_wasm_code_to_compile_lvl3(
-        hira_module_lvl3.name.clone(), hira_module_lvl3.contents.clone(), dependency_config
+        hira_module_lvl3.name.clone(), hira_module_lvl3.contents.clone(),
+        dependency_config, &dependency_name,
     );
 
     let module_code = module_code.to_string();
@@ -568,7 +570,7 @@ pub fn get_wasm_code_to_compile2(
 
     Ok([
         ("hira_base".to_string(), hira_base_code),
-        ("dependencies".to_string(), module_code),
+        (dependency_name, module_code),
         (hira_module_lvl3.name.to_string(), users_code),
     ])
 }
@@ -576,11 +578,13 @@ pub fn get_wasm_code_to_compile2(
 pub fn get_wasm_code_to_compile_lvl3(
     lvl3module_name: String,
     lvl3module_def: String,
-    lvl2module: DependencyConfig
+    lvl2module: DependencyConfig,
+    dependency_crate_name: &String,
 ) -> TokenStream {
     let mod3name = format_ident!("{}", lvl3module_name);
     let mod2name = format_ident!("{}", lvl2module.name);
     let conf0 = format_ident!("conf_0");
+    let dep_crate_name = format_ident!("{}", dependency_crate_name);
 
     let mod2_calling_code = lvl2module.config_calling_code(conf0.clone());
     let lvl3mod_tokens = TokenStream::from_str(&lvl3module_def).expect("Failed to parse lvl3 module def as tokens");
@@ -589,7 +593,7 @@ pub fn get_wasm_code_to_compile_lvl3(
         extern crate hira_base;
         extern crate dependencies;
         use hira_base::LibraryObj;
-        use dependencies::*;
+        use #dep_crate_name::*;
 
         #lvl3mod_tokens
 
