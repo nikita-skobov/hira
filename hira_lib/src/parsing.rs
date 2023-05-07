@@ -488,7 +488,7 @@ impl DependencyConfig {
                 DependencyType::Mod1or2(x) => {
                     let x_name = format_ident!("{}", x.name);
                     config_lets.push(quote!{ let mut #conf_name = #x_name::Input::default(); });
-                    config_pass.push(quote!{ &mut #conf_name });
+                    config_pass.push(quote!{ &mut #conf_name, });
                     recursive.push(x.config_calling_code(conf_name));
                 }
                 DependencyType::Library(x) => {
@@ -498,17 +498,9 @@ impl DependencyConfig {
                 }
             };
         }
-        // we only want to set_current_module for anytime we're calling the config of
-        // a level 2 or 3 module. this way, level1 functionality can pass on the values set
-        // by the level 2 modules
-        let set_current_module = if self.level == ModuleLevel::Level1 {
-            TokenStream::new()
-        } else {
-            quote! {library_obj.l0_core.set_current_module(#item_name);}
-        };
         quote! {
             #(#config_lets)*
-            #set_current_module
+            library_obj.l0_core.set_current_module(#item_name);
             #item_name_ident::config(&mut #first_config_ident, #(#config_pass)*);
 
             #(#recursive)*

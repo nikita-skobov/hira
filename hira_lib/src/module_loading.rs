@@ -46,11 +46,9 @@ pub struct HiraModule {
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum ModuleLevel {
-    /// built into hira. not relevant for parsing
-    Level0,
-    /// use Level0 capabilities.
+    /// built into hira itself
     Level1,
-    /// cannot use Level0 capabilities. Can depend on multiple Level1 and Level2 modules
+    /// Can depend on multiple Level1 and Level2 modules
     Level2,
     /// Can only depend on 1 single Level 2 module. Can specify `mod outputs`
     Level3,
@@ -58,7 +56,7 @@ pub enum ModuleLevel {
 
 impl Default for ModuleLevel {
     fn default() -> Self {
-        Self::Level0
+        Self::Level1
     }
 }
 
@@ -158,7 +156,7 @@ impl HiraModule2 {
                     has_l2_dep = Some(x);
                 }
                 DependencyTypeName::Library(x) => {
-                    return Err(compiler_error(&format!("Detected {} as {:?}, but found it attempting to use {} in its config function. Only Level1 modules are allowed to use Level0 functionality in the config function", self.name, self.level, x)));
+                    return Err(compiler_error(&format!("Detected {} as {:?}, but found it attempting to use {} in its config function. Only Level2 modules are allowed to use Level1 functionality in the config function", self.name, self.level, x)));
                 }
             }
         }
@@ -204,16 +202,12 @@ impl HiraModule2 {
                 self.compile_dependencies.push(DependencyTypeName::Library(after_mut.trim().to_string()));
             }
         }
-        // if any of the compile_dependencies start with L0, then this is a L1 module
-        //    (because only L1 modules are allowed to use L0 capabilities)
         // if this has more than 1 signature input, and its not a L1 module, then it is a L2 module
         //    (because we know its not an L1 module, and L3 modules can only have 1 signature input)
         // if this module does not have an input struct, it MUST be a L3 module
         //    (because all other types of modules must specify their input shape)
         // otherwise we default to assume its level2, but we perform validation afterwards
-        if has_l0_deps {
-            self.level = ModuleLevel::Level1;
-        } else if self.config_fn_signature_inputs.len() > 1 {
+        if self.config_fn_signature_inputs.len() > 1 {
             self.level = ModuleLevel::Level2;
         } else if self.input_struct.is_empty() {
             self.level = ModuleLevel::Level3;
@@ -223,7 +217,7 @@ impl HiraModule2 {
 
         if self.level != ModuleLevel::Level3 && !self.is_pub {
             return Err(compiler_error(
-                &format!("Detected module {} as {:?}, but it is not marked public. Level1 and Level2 modules must be public", self.name, self.level)
+                &format!("Detected module {} as {:?}, but it is not marked public. Level2 modules must be public", self.name, self.level)
             ));
         }
 
@@ -244,11 +238,6 @@ impl HiraModule2 {
         // verify the shape of outputs is valid:
         if !self.outputs.is_empty() {
             match self.level {
-                // its impossible for this to be a level0, but to make the match statement
-                // look nicer im putting it here anyway
-                ModuleLevel::Level1 | ModuleLevel::Level0 => {
-                    return Err(compiler_error(&format!("Detected module {} as {:?}, but it has a `mod outputs` section. Only Level2 and Level3 modules can specify an outputs section", self.name, self.level)));
-                }
                 ModuleLevel::Level2 => {
                     // ensure L2 modules can only specify specific const outputs
                     if self.outputs.iter().any(|x| if let OutputType::SpecificConst(_) = x { false } else { true }) {
@@ -276,6 +265,8 @@ impl HiraModule2 {
                         }
                     }
                 }
+                // its impossible for this to be a level1
+                _ => {}
             }
         }
 
