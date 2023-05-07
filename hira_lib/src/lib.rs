@@ -37,9 +37,14 @@ pub struct HiraConfig {
     pub default_callbacks: HashMap<String, String>,
 
     pub hira_base_code: String,
+
+    pub modules2: HashMap<String, module_loading::HiraModule2>,
 }
 
 impl HiraConfig {
+    fn get_mod2(&self, name: &str) -> Option<&module_loading::HiraModule2> {
+        self.modules2.get(name)
+    }
     fn new() -> Self {
         let mut out = Self::default();
         out.set_directories();
@@ -54,7 +59,7 @@ impl HiraConfig {
         let mut hira_base = LibraryObj::include_in_rs_wasm();
         hira_base.push_str(WASM_PARSING_TRAIT_STR);
         hira_base.push_str(lib_obj_impl());
-        hira_base.push_str(user_data_impl());
+        // hira_base.push_str(user_data_impl());
         hira_base.push_str(kv_obj_impl());
         self.hira_base_code = hira_base;
     }
