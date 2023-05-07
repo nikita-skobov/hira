@@ -72,6 +72,22 @@ pub fn iterate_expr_for_strings(
     }
 }
 
+/// given a list of paths of names into an item tree
+/// such as "use A::B::C::outputs::something"
+/// return a tuple of the module name (this is always 1 before the outputs)
+/// and optionally if there is a field after outputs, the specific import
+pub fn parse_module_name_from_use_tree(names: &[String]) -> Option<(&String, Option<&String>)> {
+    let output_index = names.iter().position(|x| x == "outputs")?;
+    let mod_name_index = if output_index > 0 { output_index - 1 } else { return None };
+    let mod_name = &names[mod_name_index];
+    if output_index == names.len() - 1 {
+        return Some((mod_name, None));
+    }
+    // otherwise, there's something after the outputs
+    let last = names.last()?;
+    Some((mod_name, Some(last)))
+}
+
 /// callback takes 3 args:
 /// - list of all paths into the use tree in order left to right.
 /// - option of if this is a renamed item

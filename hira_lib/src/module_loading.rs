@@ -5,7 +5,7 @@ use proc_macro2::TokenStream;
 use quote::{quote, format_ident, ToTokens};
 use syn::{parse_file, ItemUse};
 
-use crate::parsing::{remove_surrounding_quotes, get_input_type, parse_callback_required_module, extract_default_attr, parse_as_module_item, iterate_mod_def, get_ident_string};
+use crate::parsing::{remove_surrounding_quotes, get_input_type, parse_callback_required_module, extract_default_attr, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree};
 use crate::wasm_types::*;
 use wasm_type_gen::*;
 
@@ -62,6 +62,37 @@ impl Default for ModuleLevel {
     }
 }
 
+
+#[derive(Debug, PartialEq)]
+pub enum OutputType {
+    /// corresponds to doing:
+    /// ```
+    /// mod outputs {
+    ///     use some_lvlv2::outputs::*;
+    /// }
+    /// ```
+    /// In this case we just store the name of the lvl2 dependency
+    AllFromModule(String),
+    /// corresponds to doing:
+    /// ```
+    /// mod outputs {
+    ///     use some_lvlv2::outputs::{A, B, C};
+    /// }
+    /// ```
+    /// in this case we specify (some_lvl2, A), (some_lvl2, B), (some_lvl2, C)
+    SpecificFromModule(String, String),
+    /// corresponds to doing:
+    /// ```
+    /// mod outputs {
+    ///     const SOME_OUTPUT: &'str = "hi";
+    /// }
+    /// ```
+    /// Only lvl2 modules are allowed to specify specific constant values.
+    /// These can then be referenced by lvl3 modules explicitly. The string is just
+    /// the name of the constant ident, and it is implied that the dependency is self.
+    SpecificConst(String),
+}
+
 #[derive(Default, Debug)]
 pub struct HiraModule2 {
     pub name: String,
@@ -90,14 +121,14 @@ pub struct HiraModule2 {
     pub compile_dependencies: HashSet<DependencyTypeName>,
     /// List of names of fields that this module outputs to be
     /// used by other modules.
-    /// can either be individual items inside
+    /// must be individual items inside
     /// "pub mod outputs { ... }"
-    /// or "pub use other_crate::outputs::*"
+    /// or simply "pub mod outputs { use lvl2module::outputs::* }"
     /// Outputs must be statically defined, ie: specific fields w/ names and types
     /// therefore something like "use X::*" must ensure that X can be resolved at
     /// the time we are processing this module, failure to resolve results in
     /// a compilation failure
-    pub outputs: Vec<(String, String)>,
+    pub outputs: Vec<OutputType>,
 }
 
 impl HiraModule2 {
@@ -992,22 +1023,19 @@ pub fn set_dependencies_recursively(deps: &mut HashMap<String, Result<Vec<String
     let mut past_names = vec![];
     iterate_item_tree(&mut past_names, tree, &mut |names, renamed, wildcard| {
         // first, find the actual module name
-        let outputs_index = names.iter().position(|x| x == "outputs");
-        let output_index = match outputs_index {
-            Some(i) => i,
+        let (mod_name, specific_import) = match parse_module_name_from_use_tree(names) {
+            Some(a) => a,
             None => return,
         };
-        let mod_name_index = if output_index > 0 { output_index - 1 } else { return };
-        let mod_name = &names[mod_name_index];
-        let mut last_part = match names.last() {
-            Some(n) => n.to_string(),
-            None => return,
+        // if the last part is a wildcard, then we want all imports.
+        // also: if there is no specific import, this means the last component
+        // is "outputs", and then we also want to use a wildcard
+        let last_part = match (wildcard, specific_import) {
+            (true, _) => "*".to_string(),
+            (false, None) => "*".to_string(),
+            (false, Some(x)) => x.to_string(),
         };
-        // if the last name is outputs, then it means we want all imports from this.
-        // similarly, if the last part is a wildcard, then we also want all imports
-        if wildcard || output_index == names.len() - 1 {
-            last_part = "*".to_string();
-        }
+
         // dont allow "use X::outputs::something as abc"
         // renaming only allowed for "use X::outputs as x_outputs"
         if last_part != "*" && renamed.is_some() {
@@ -1025,26 +1053,48 @@ pub fn set_dependencies_recursively(deps: &mut HashMap<String, Result<Vec<String
 /// and a normal crate/module that this module wants to use...
 pub fn set_dependencies(module: &mut HiraModule2, item: &mut syn::ItemUse) {
     let mut deps = std::mem::take(&mut module.dependencies);
-    let past_names = vec![];
-    set_dependencies_recursively(&mut deps, &past_names, &item.tree);
+    set_dependencies_recursively(&mut deps, &item.tree);
     module.dependencies = deps;
 }
 
 pub fn set_outputs(module: &mut HiraModule2, item: &mut syn::ItemMod) {
     let name = get_ident_string(&item.ident);
     if name != "outputs" { return; }
+    match item.vis {
+        // ignore non-public output modules. this will be caught in verification
+        // and show an error to the user if they didnt mark their outputs as pub
+        syn::Visibility::Restricted(_) | syn::Visibility::Inherited => {
+            return
+        }
+        _ => {}
+    }
     let mut default_vec = vec![];
     for item in item.content.as_mut().map(|x| &mut x.1).unwrap_or(&mut default_vec) {
-        // TODO: for now we only allow constants,
-        // but in the future to support level 2 module wrapping, need to be
-        // able to support something like "mod outputs { pub use other_module::outputs::*; }"
         if let syn::Item::Const(c) = item {
             let name = get_ident_string(&c.ident);
-            // TODO: actually check the value and type...
-            // currently we just assume its a string and store as such.
-            let mut value = c.expr.to_token_stream().to_string();
-            remove_surrounding_quotes(&mut value);
-            module.outputs.push((name, value));
+            module.outputs.push(OutputType::SpecificConst(name));
+            continue;
+        }
+        if let syn::Item::Use(u) = item {
+            let mut names = vec![];
+            iterate_item_tree(&mut names, &u.tree, &mut |paths, _, wildcard| {
+                let (mod_name, specific_import) = match parse_module_name_from_use_tree(paths) {
+                    Some(x) => x,
+                    None => return,
+                };
+                match (wildcard, specific_import) {
+                    (true, _) => {
+                        module.outputs.push(OutputType::AllFromModule(mod_name.to_string()));
+                    }
+                    (false, None) => {
+                        // this corresponds to "use other_module::outputs"
+                        // this shouldnt be allowed in this context. so we just ignore it.
+                    }
+                    (false, Some(specific)) => {
+                        module.outputs.push(OutputType::SpecificFromModule(mod_name.to_string(), specific.to_string()));
+                    }
+                }
+            });
         }
     }
 }
@@ -1181,6 +1231,32 @@ mod tests {
         assert!(out.is_err());
         let err = out.err().unwrap().to_string();
         assert!(err.contains("must be public"));
+    }
+
+    #[test]
+    fn mod2_outputs_work() {
+        let code = r#"
+        mod hello_world {
+            pub struct Input { pub a: u32 }
+            pub fn config(input: &mut Input) {}
+
+            // it is invalid to have an outputs section like this:
+            // this would fail verification. but for the purpose of this test
+            // we put all cases in 1 module. this works
+            // because this test case doesnt run verification
+            pub mod outputs {
+                use other_module::outputs; // should be ignored
+                use something::outputs::specific;
+                use apples::outputs::*;
+                pub const HELLO: &'static str = "dsa";
+            }
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        assert_eq!(module.outputs[0], OutputType::SpecificFromModule("something".to_string(), "specific".to_string()));
+        assert_eq!(module.outputs[1], OutputType::AllFromModule("apples".to_string()));
+        assert_eq!(module.outputs[2], OutputType::SpecificConst("HELLO".to_string()));
     }
 
     #[test]
