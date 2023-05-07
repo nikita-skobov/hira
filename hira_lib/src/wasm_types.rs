@@ -583,7 +583,7 @@ pub fn get_wasm_code_to_compile_lvl3(
 
     quote! {
         extern crate hira_base;
-        extern crate dependencies;
+        extern crate #dep_crate_name;
         use hira_base::LibraryObj;
         use #dep_crate_name::*;
 

@@ -1029,9 +1029,13 @@ pub fn hira_mod2_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<Tok
     let codes = get_wasm_code_to_compile2(conf, &module)?;
     conf.modules2.insert(module.name.clone(), module);
 
-
-    // TODO:
-    // - run the module as wasm + dependencies
+    let mut pass_this = LibraryObj::new();
+    // TODO: fill in library obj according to the required capabilities
+    let mut lib_obj = get_wasm_output(
+        &conf.wasm_directory,
+        &codes,
+        &pass_this
+    ).unwrap_or_default();
 
     Ok(stream)
 }
