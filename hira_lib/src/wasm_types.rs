@@ -92,6 +92,11 @@ pub struct L0KvReader {
 }
 
 #[derive(WasmTypeGen, Debug, Default)]
+pub struct L0AppendFile {
+    shared_output_data: Vec<SharedOutputEntry>,
+}
+
+#[derive(WasmTypeGen, Debug, Default)]
 pub struct L0Core {
     compiler_error_message: String,
     module_outputs: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
@@ -130,12 +135,62 @@ pub struct LibraryObj {
     /// - outputting compiler error messages
     /// - saving module outputs to be used by other functions
     pub l0_core: L0Core,
+
+    pub l0_append_file: L0AppendFile,
 }
 
 impl LibraryObj {
     pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
         self.l0_core.apply_changes(conf, module)?;
+        self.l0_append_file.apply_changes(conf, module)?;
         Ok(())
+    }
+    pub fn initialize_capabilities(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
+        // core doesnt need any initialization (for now)
+        self.l0_append_file.initialize_capabilities(conf, module)?;
+        Ok(())
+    }
+}
+
+impl L0AppendFile {
+    pub fn initialize_capabilities(&mut self, _conf: &mut HiraConfig, _module: &mut HiraModule2) -> Result<(), TokenStream> {
+        // TODO: actually i dont think this is necessary.
+        // for file operations i think itll be easier to be optimistic, and just let the writers
+        // put data in this struct, and then we verify that its valid when we leave the wasm context.
+        Ok(())
+    }
+    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
+        let mut all_transient_deps = HashSet::new();
+        module.visit_lvl3_dependency_names(&conf, &mut |dep| {
+            all_transient_deps.insert(dep.to_string());
+        });
+        // collect all the files these modules are allowed to access:
+        let mut all_allowed_files = HashSet::new();
+        for dep in all_transient_deps.iter() {
+            if let Some(dep_module) = conf.get_mod2(dep) {
+                for file in dep_module.file_capabilities.iter() {
+                    all_allowed_files.insert(file);
+                }
+            }
+        }
+        // verify that all files that were provided were ones that this module was allowed to touch
+        // TODO: technically this is wrong...
+        // what this checks for is if ANY transient dependency specified this file
+        // what we really want is to only allow specific modules to write to specific files.
+        let mut out = Ok(());
+        let contents: Vec<SharedOutputEntry> = self.shared_output_data.drain(..).map(|x| {
+            if !all_allowed_files.contains(&x.filename) {
+                out = Err(compiler_error(&format!("Module '{}' had a dependency that attempted to write file {}, but allowed files are only {:?}", module.name, x.filename, all_allowed_files)));
+            }
+            x
+        }).collect();
+        if out.is_err() {
+            return out;
+        }
+
+        let mapped_data = to_map_entry(contents);
+        conf.output_shared_files(&module.name, mapped_data)?;
+        out
     }
 }
 
@@ -471,6 +526,63 @@ impl From<&InputType> for UserData {
     }
 }
 
+#[output_and_stringify_basic_const(FILE_IMPL)]
+impl L0AppendFile {
+    pub fn new() -> Self {
+        Self { shared_output_data: Default::default() }
+    }
+
+    /// given a file name (no paths. the file will appear in ./wasmgen/{filename})
+    /// and a label, and a line (string) append to the file. create the file if it doesnt exist.
+    /// the label is used to sort lines between your wasm module and other invocations.
+    /// the label is also embedded to the file. so if you are outputing to a .sh file, for example,
+    /// your label should start with '#'. The labels are sorted alphabetically.
+    /// Example:
+    /// ```rust,ignore
+    /// # wasm module 1 does:
+    /// append_to_file("hello.txt", "b", "line1");
+    /// # wasm module 2 does:
+    /// append_to_file("hello.txt", "b", "line2");
+    /// # wasm module 3 does:
+    /// append_to_file("hello.txt", "a", "line3");
+    /// # wasm moudle 4 does:
+    /// append_to_file("hello.txt", "a", "line4");
+    /// 
+    /// # the output:
+    /// a
+    /// line3
+    /// line4
+    /// b
+    /// line1
+    /// line2
+    /// ```
+    #[allow(dead_code)]
+    pub fn append_to_file(&mut self, name: &str, label: &str, line: String) {
+        self.shared_output_data.push(SharedOutputEntry { label: label.into(), line, filename: name.into(), unique: false, after: None });
+    }
+
+    /// same as append_to_file, but the line will be unique within the label
+    #[allow(dead_code)]
+    pub fn append_to_file_unique(&mut self, name: &str, label: &str, line: String) {
+        self.shared_output_data.push(SharedOutputEntry { label: label.into(), line, filename: name.into(), unique: true, after: None });
+    }
+
+    /// like append_to_file, but given a search string, find that search string in that label
+    /// and then append the `after` portion immediately after the search string. Example:
+    /// ```rust,ignore
+    /// // "hello " doesnt exist yet, so the whole "hello , and also my friend Tim!" gets added
+    /// append_to_line("hello.txt", "a", "hello ", ", and also my friend Tim!");
+    /// append_to_line("hello.txt", "a", "hello ", "world"); 
+    /// 
+    /// # the output:
+    /// hello world, and also my friend Tim!
+    /// ```
+    #[allow(dead_code)]
+    pub fn append_to_line(&mut self, name: &str, label: &str, search_str: String, after: String) {
+        self.shared_output_data.push(SharedOutputEntry { label: label.into(), line: search_str, filename: name.into(), unique: false, after: Some(after) });
+    }
+}
+
 #[output_and_stringify_basic_const(LIBRARY_OBJ_IMPL)]
 impl LibraryObj {
     #[allow(dead_code)]
@@ -486,6 +598,7 @@ impl LibraryObj {
 
             l0_kv_reader: L0KvReader::new(),
             l0_core: L0Core::new(),
+            l0_append_file: L0AppendFile::new(),
         }
     }
     // #[allow(dead_code)]
@@ -654,6 +767,10 @@ pub fn kv_obj_impl() -> &'static str {
 
 pub fn core_obj_impl() -> &'static str {
     CORE_IMPL
+}
+
+pub fn file_obj_impl() -> &'static str {
+    FILE_IMPL
 }
 
 pub fn to_map_entry(data: Vec<SharedOutputEntry>) -> Vec<MapEntry<MapEntry<(bool, String, Option<String>)>>> {

@@ -134,6 +134,7 @@ pub fn iterate_mod_def(
     struct_callbacks: &[fn(&mut HiraModule2, &mut ItemStruct)],
     use_callbacks: &[fn(&mut HiraModule2, &mut ItemUse)],
     mod_callbacks: &[fn(&mut HiraModule2, &mut ItemMod)],
+    const_callbacks: &[fn(&mut HiraModule2, &mut ItemConst)],
 ) {
     module.name = get_ident_string(&mod_def.ident);
     module.is_pub = match mod_def.vis {
@@ -162,6 +163,11 @@ pub fn iterate_mod_def(
             }
             Item::Use(x) => {
                 for cb in use_callbacks {
+                    cb(module, x);
+                }
+            }
+            Item::Const(x) => {
+                for cb in const_callbacks {
                     cb(module, x);
                 }
             }

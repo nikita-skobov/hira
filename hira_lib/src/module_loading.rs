@@ -19,6 +19,7 @@ pub const REQUIRED_CRATES_NAME: &'static str = "REQUIRED_CRATES";
 pub const REQUIRED_HIRA_MODS_NAME: &'static str = "REQUIRED_HIRA_MODULES";
 pub const HIRA_MOD_NAME_NAME: &'static str = "HIRA_MODULE_NAME";
 pub const EXPORT_ITEM_NAME: &'static str = "ExportType";
+pub const FILE_CAPABILITIES_NAME: &'static str = "FILES";
 
 #[derive(Debug)]
 pub enum LoadedFrom {
@@ -138,6 +139,8 @@ pub struct HiraModule2 {
     /// we set these in memory such that other modules that depend on these values can
     /// reference them.
     pub resolved_outputs: HashMap<String, String>,
+
+    pub file_capabilities: Vec<String>,
 }
 
 impl HiraModule2 {
@@ -151,6 +154,28 @@ impl HiraModule2 {
             Ok(out) => {
                 Some(out.clone())
             }
+        }
+    }
+
+    pub fn visit_dependencies_recursively(name: &str, conf: &HiraConfig, cb: &mut impl FnMut(&str)) {
+        if let Some(module) = conf.get_mod2(name) {
+            for dep in module.compile_dependencies.iter() {
+                match dep {
+                    DependencyTypeName::Mod1Or2(mod_name) => {
+                        cb(&mod_name);
+                        Self::visit_dependencies_recursively(&mod_name, conf, cb);
+                    }
+                    // these are ignored as theres nothing to visit
+                    DependencyTypeName::Library(_) => {}
+                }
+            }
+        }
+    }
+
+    pub fn visit_lvl3_dependency_names(&self, conf: &HiraConfig, cb: &mut impl FnMut(&str)) {
+        if let Some(dep_name) = &self.lvl3_module_depends_on {
+            cb(dep_name);
+            Self::visit_dependencies_recursively(&dep_name, conf, cb);
         }
     }
 
@@ -1042,7 +1067,8 @@ pub fn hira_mod2_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<Tok
     let codes = get_wasm_code_to_compile2(conf, &module)?;
 
     let mut pass_this = LibraryObj::new();
-    // TODO: fill in library obj according to the required capabilities
+    pass_this.initialize_capabilities(conf, &mut module)?;
+
     let mut lib_obj = get_wasm_output(
         &conf.wasm_directory,
         &codes,
@@ -1067,6 +1093,15 @@ pub fn set_config_fn_sig(module: &mut HiraModule2, item: &mut syn::ItemFn) {
         };
         module.config_fn_signature_inputs.push(push_s);
     }
+}
+
+pub fn set_file_capability(module: &mut HiraModule2, item: &mut syn::ItemConst) {
+    if item.ident.to_string() != FILE_CAPABILITIES_NAME {
+        return;
+    }
+    iterate_expr_for_strings(&*item.expr, |a| {
+        module.file_capabilities.push(a);
+    });
 }
 
 pub fn set_input_item_struct(module: &mut HiraModule2, item: &mut syn::ItemStruct) {
@@ -1204,6 +1239,7 @@ pub fn parse_module_from_stream(stream: TokenStream) -> Result<HiraModule2, Toke
         &[set_input_item_struct],
         &[set_dependencies],
         &[set_outputs],
+        &[set_file_capability],
     );
     Ok(hira_mod)
 }
@@ -1211,6 +1247,8 @@ pub fn parse_module_from_stream(stream: TokenStream) -> Result<HiraModule2, Toke
 
 #[cfg(test)]
 mod tests {
+    use syn::ItemConst;
+
     use super::*;
 
     #[test]
@@ -1264,6 +1302,16 @@ mod tests {
         assert_eq!(module.dependencies["somedep2"], Ok(vec!["A1".to_string(), "A2".to_string()]));
         assert!(module.input_struct.contains("pub a"));
         assert!(module.input_struct.contains("pub struct Input"));
+    }
+
+    #[test]
+    fn mod2_file_permissions_get_set_correctly() {
+        let code = r#"pub const FILES: &[&str] = &["hello.txt"];"#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut item = syn::parse2::<ItemConst>(stream).unwrap();
+        let mut module = HiraModule2::default();
+        set_file_capability(&mut module, &mut item);
+        assert_eq!(module.file_capabilities[0], "hello.txt");
     }
 
     #[test]

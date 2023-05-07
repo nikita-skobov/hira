@@ -2,9 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::sync::Mutex;
 use module_loading::HiraModule;
+use parsing::compiler_error;
+use proc_macro2::TokenStream;
 use toml::Table;
 use wasm_type_gen::{WasmIncludeString, WASM_PARSING_TRAIT_STR};
-use wasm_types::{MapEntry, LibraryObj, lib_obj_impl, kv_obj_impl, core_obj_impl};
+use wasm_types::{MapEntry, LibraryObj, lib_obj_impl, kv_obj_impl, core_obj_impl, file_obj_impl};
 
 pub mod parsing;
 pub mod module_loading;
@@ -61,6 +63,7 @@ impl HiraConfig {
         // hira_base.push_str(user_data_impl());
         hira_base.push_str(kv_obj_impl());
         hira_base.push_str(core_obj_impl());
+        hira_base.push_str(file_obj_impl());
         self.hira_base_code = hira_base;
     }
 
@@ -89,14 +92,14 @@ impl HiraConfig {
         &mut self,
         wasm_module_name: &str,
         data: Vec<MapEntry<MapEntry<(bool, String, Option<String>)>>>
-    ) -> Result<(), String> {
+    ) -> Result<(), TokenStream> {
         // merge the current data with the previous data
         for entry in data {
             let file_name = entry.key;
             // this is how we enforce that shared files only get output
             // to the shared directory. basically: it can only be a file name, not a path.
             if file_name.contains("/") || file_name.contains("\\") {
-                return Err(format!("Wasm module '{wasm_module_name}' attempted to output a shared file outside the shared file directory {:?}", file_name));
+                return Err(compiler_error(&format!("Wasm module '{wasm_module_name}' attempted to output a shared file outside the shared file directory {:?}", file_name)));
             }
             for file_data in entry.lines {
                 let label = file_data.key;
@@ -147,8 +150,8 @@ impl HiraConfig {
 
     fn iterate_map_entry(
         file_entry: &mut MapEntry<MapEntry<String>>,
-        mut cb: impl FnMut(&str) -> Result<(), String>
-    ) -> Result<(), String> {
+        mut cb: impl FnMut(&str) -> Result<(), TokenStream>
+    ) -> Result<(), TokenStream> {
         // sort the labels alphabetically
         file_entry.lines.sort_by(|a, b| a.key.cmp(&b.key));
 
@@ -183,7 +186,7 @@ impl HiraConfig {
         &mut self,
         wasm_module_name: &str,
         data: Vec<MapEntry<MapEntry<(bool, String, Option<String>)>>>
-    ) -> Result<(), String> {
+    ) -> Result<(), TokenStream> {
         // set the wasm_module's data into the global shared data object.
         self.merge_shared_files(wasm_module_name, data)?;
         // we only wish to actually write to disk if this is a real build
@@ -200,11 +203,11 @@ impl HiraConfig {
             let file_name = &file_entry.key;
             let file_path = format!("{shared_dir}/{file_name}");
             let mut out_f = std::fs::File::create(&file_path)
-                .map_err(|e| format!("Failed to create/open file while running module '{wasm_module_name}' {:?}\nError:\n{:?}", file_path, e))?;
+                .map_err(|e| compiler_error(&format!("Failed to create/open file while running module '{wasm_module_name}' {:?}\nError:\n{:?}", file_path, e)))?;
 
             Self::iterate_map_entry(file_entry, |s| {
                 out_f.write_all(s.as_bytes())
-                    .map_err(|e| format!("Failed to write to file while running module '{wasm_module_name}' {:?}\nError:\n{:?}", file_path, e))
+                    .map_err(|e| compiler_error(&format!("Failed to write to file while running module '{wasm_module_name}' {:?}\nError:\n{:?}", file_path, e)))
             })?;
         }
 
@@ -481,6 +484,69 @@ mod e2e_tests {
         let conf = e2e_module2_run(&code, |_| {}).expect("Failed to compile");
         let module = conf.get_mod2("mylevel3mod").expect("Failed to find mylevel3mod");
         assert_eq!(module.resolved_outputs["REGION"], "eu-west-1");
+    }
+
+    #[test]
+    fn mod2_can_output_shared_file_data() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0AppendFile;
+
+                    pub const FILES: &[&str] = &["hello.txt"];
+
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub fn config(input: &mut Input, l0core: &mut L0AppendFile) {
+                        l0core.append_to_file("hello.txt", "b", "line1".to_string());
+                        l0core.append_to_file("hello.txt", "b", "line2".to_string());
+                        l0core.append_to_file("hello.txt", "a", "line3".to_string());
+                        l0core.append_to_file("hello.txt", "a", "line4".to_string());
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let res = e2e_module2_run(&code,|_| {});
+        let mut conf = res.ok().unwrap();
+        let data = conf.get_shared_file_data("hello.txt").expect("Failed to find hello.txt");
+        assert_eq!(data, "a\nline3\nline4\nb\nline1\nline2\n");
+    }
+
+    #[test]
+    fn mod2_requires_file_permissions_to_be_defined_statically() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0AppendFile;
+
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub fn config(input: &mut Input, l0core: &mut L0AppendFile) {
+                        l0core.append_to_file("you_got_hacked.txt", "b", "line1".to_string());
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let res = e2e_module2_run(&code,|_| {});
+        let err = res.err().unwrap();
+        let err_str = err.to_string();
+        assert_contains_str(err_str, "had a dependency that attempted to write file you_got_hacked.txt, but allowed files are only");
     }
 
     #[test]
