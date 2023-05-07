@@ -115,6 +115,7 @@ pub struct HiraModule2 {
 
     /// whereas `dependencies` tracks logical dependencies, `compile_dependencies`
     /// tracks actual dependencies required for compiling this as a wasm module.
+    /// This field is inferred based on the config function signature, not the use statements.
     /// This field is set after parsing, as it requires verification that modules exist
     pub compile_dependencies: Vec<DependencyTypeName>,
 
@@ -150,28 +151,6 @@ impl HiraModule2 {
             Ok(out) => {
                 Some(out.clone())
             }
-        }
-    }
-
-    pub fn visit_dependencies_recursively(name: &str, conf: &HiraConfig, cb: &mut impl FnMut(&str)) {
-        if let Some(module) = conf.get_mod2(name) {
-            for dep in module.compile_dependencies.iter() {
-                match dep {
-                    DependencyTypeName::Mod1Or2(mod_name) => {
-                        cb(&mod_name);
-                        Self::visit_dependencies_recursively(&mod_name, conf, cb);
-                    }
-                    // these are ignored as theres nothing to visit
-                    DependencyTypeName::Library(_) => {}
-                }
-            }
-        }
-    }
-
-    pub fn visit_lvl3_dependency_names(&self, conf: &HiraConfig, cb: &mut impl FnMut(&str)) {
-        if let Some(dep_name) = &self.lvl3_module_depends_on {
-            cb(dep_name);
-            Self::visit_dependencies_recursively(&dep_name, conf, cb);
         }
     }
 
