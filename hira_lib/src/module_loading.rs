@@ -162,15 +162,20 @@ impl HiraModule2 {
                 }
             }
         }
-        let l2_dep_name = has_l2_dep
-            .ok_or_else(|| {
-                compiler_error(&format!("Detected {} as {:?}, but failed to find a level2 module's input in the config function signature", self.name, self.level))
-            })?;
         if self.config_fn_signature_inputs.len() != 1 {
             return Err(compiler_error(&format!("Detected {} as {:?}, but its config function signature has more than 1 input", self.name, self.level)));
         }
-        self.lvl3_module_depends_on = Some(l2_dep_name.to_string());
+        let s = self.level3_get_depends_on(has_l2_dep)?;
+        self.lvl3_module_depends_on = Some(s);
         Ok(())
+    }
+
+    pub fn level3_get_depends_on(&self, opt: Option<&String>) -> Result<String, TokenStream> {
+        let l2_dep_name = opt
+        .ok_or_else(|| {
+            compiler_error(&format!("Detected {} as {:?}, but failed to find a level2 module's input in the config function signature", self.name, self.level))
+        })?;
+        Ok(l2_dep_name.to_string())
     }
 
     pub fn verify_config_signature(&mut self) -> Result<(), TokenStream> {
