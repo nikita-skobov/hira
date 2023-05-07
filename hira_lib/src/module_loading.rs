@@ -203,8 +203,6 @@ impl HiraModule2 {
         // ensure other levels DO have one, and ensure it has a Default method
         // scan its attributes for (Derive(Default)), impl w/ a default() signature, etc.
 
-        // TODO: module must be public if its a lvl1, or 2 module
-
         Ok(())
     }
 }
