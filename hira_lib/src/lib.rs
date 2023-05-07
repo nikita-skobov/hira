@@ -4,14 +4,13 @@ use std::sync::Mutex;
 use module_loading::HiraModule;
 use toml::Table;
 use wasm_type_gen::{WasmIncludeString, WASM_PARSING_TRAIT_STR};
-use wasm_types::{MapEntry, LibraryObj, lib_obj_impl, user_data_impl, kv_obj_impl};
+use wasm_types::{MapEntry, LibraryObj, lib_obj_impl, kv_obj_impl, core_obj_impl};
 
 pub mod parsing;
 pub mod module_loading;
 pub mod wasm_types;
 
 use crate::module_loading::load_module;
-use crate::wasm_types::to_map_entry;
 
 pub const HIRA_DIR_NAME: &'static str = "hira";
 pub const HIRA_WASM_DIR_NAME: &'static str = "wasm_out";
@@ -61,6 +60,7 @@ impl HiraConfig {
         hira_base.push_str(lib_obj_impl());
         // hira_base.push_str(user_data_impl());
         hira_base.push_str(kv_obj_impl());
+        hira_base.push_str(core_obj_impl());
         self.hira_base_code = hira_base;
     }
 

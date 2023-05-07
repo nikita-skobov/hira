@@ -92,6 +92,13 @@ pub struct L0KvReader {
 }
 
 #[derive(WasmTypeGen, Debug, Default)]
+pub struct L0Core {
+    compiler_error_message: String,
+    module_outputs: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    current_module_name: String,
+}
+
+#[derive(WasmTypeGen, Debug, Default)]
 pub struct LibraryObj {
     // pub compiler_error_message: String,
     // pub add_code_after: Vec<String>,
@@ -115,6 +122,14 @@ pub struct LibraryObj {
     // will only see the type name "L0KvReader" and will
     // convert it to snake case
     pub l0_kv_reader: L0KvReader,
+
+    /// Core L0 functionality.
+    /// None of the functionality within core is marked as a capability
+    /// because these are all library-approved actions, and thus shouldnt
+    /// require user review. These are operations such as:
+    /// - outputting compiler error messages
+    /// - saving module outputs to be used by other functions
+    pub l0_core: L0Core,
 }
 
 
@@ -371,6 +386,7 @@ impl LibraryObj {
             // dependencies: Default::default(),
 
             l0_kv_reader: L0KvReader::new(),
+            l0_core: L0Core::new(),
         }
     }
     // #[allow(dead_code)]
@@ -453,6 +469,41 @@ impl L0KvReader {
     }
 }
 
+#[output_and_stringify_basic_const(CORE_IMPL)]
+impl L0Core {
+    pub fn new() -> Self {
+        Self {
+            compiler_error_message: Default::default(),
+            module_outputs: Default::default(),
+            current_module_name: Default::default(),
+        }
+    }
+    // this is used by the code generator to ensure
+    // that when each module's config function is called, this
+    // sets the name such that if that module calls
+    // "set_output", then it gets properly set into the module_outputs field
+    #[doc(hidden)]
+    pub fn set_current_module(&mut self, name: &str) {
+        self.current_module_name = name.to_string();
+    }
+    /// set an output from your module. The key should correspond to
+    /// the name of one of your outputs in your `mod outputs { }` section.
+    /// case matters.
+    pub fn set_output(&mut self, key: &str, val: &str) {
+        match self.module_outputs.get_mut(&self.current_module_name) {
+            Some(x) => {
+                x.insert(key.to_string(), val.to_string());
+            }
+            None => {
+                let mut map = std::collections::HashMap::new();
+                map.insert(key.to_string(), val.to_string());
+                self.module_outputs.insert(self.current_module_name.clone(), map);
+            }
+        }
+    }
+}
+
+
 #[output_and_stringify_basic_const(USER_DATA_IMPL)]
 impl UserData {
     #[allow(dead_code)]
@@ -500,6 +551,10 @@ pub fn lib_obj_impl() -> &'static str {
 
 pub fn kv_obj_impl() -> &'static str {
     KV_IMPL
+}
+
+pub fn core_obj_impl() -> &'static str {
+    CORE_IMPL
 }
 
 pub fn to_map_entry(data: Vec<SharedOutputEntry>) -> Vec<MapEntry<MapEntry<(bool, String, Option<String>)>>> {

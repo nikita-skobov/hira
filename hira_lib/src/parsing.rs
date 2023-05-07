@@ -24,7 +24,7 @@ use syn::{
     Expr, ItemUse, Visibility, token::Pub, ItemMacro, ItemImpl
 };
 
-use crate::{module_loading::{HiraModule, HiraModule2}, wasm_types::{InputType, GlobalVariable}, HiraConfig};
+use crate::{module_loading::{HiraModule, HiraModule2, ModuleLevel}, wasm_types::{InputType, GlobalVariable}, HiraConfig};
 
 pub fn default_stream() -> TokenStream {
     compiler_error("Failed to get hira config")
@@ -462,13 +462,16 @@ pub enum DependencyTypeName {
     Library(String),
 }
 
+#[derive(Debug)]
 pub enum DependencyType {
     Mod1or2(DependencyConfig),
     Library(String),
 }
 
+#[derive(Debug)]
 pub struct DependencyConfig {
     pub name: String,
+    pub level: ModuleLevel,
     pub deps: Vec<DependencyType>,
 }
 
@@ -495,8 +498,17 @@ impl DependencyConfig {
                 }
             };
         }
+        // we only want to set_current_module for anytime we're calling the config of
+        // a level 2 or 3 module. this way, level1 functionality can pass on the values set
+        // by the level 2 modules
+        let set_current_module = if self.level == ModuleLevel::Level1 {
+            TokenStream::new()
+        } else {
+            quote! {library_obj.l0_core.set_current_module(#item_name);}
+        };
         quote! {
             #(#config_lets)*
+            #set_current_module
             #item_name_ident::config(&mut #first_config_ident, #(#config_pass)*);
 
             #(#recursive)*
@@ -509,6 +521,7 @@ pub fn fill_dependency_config(hira_conf: &HiraConfig, name: &str, dep_contents: 
         .ok_or(compiler_error(&format!("Failed to find module {}, but this module has not been loaded yet", name)))?;
     let mut out = DependencyConfig {
         name: name.to_string(),
+        level: dep_module.level,
         deps: vec![],
     };
     // TODO: add deduplication logic here. lvl2 modules

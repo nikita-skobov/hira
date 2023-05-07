@@ -44,7 +44,7 @@ pub struct HiraModule {
     pub entrypoint_fn: Option<String>, // syn::Item::Fn
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum ModuleLevel {
     /// built into hira. not relevant for parsing
     Level0,
