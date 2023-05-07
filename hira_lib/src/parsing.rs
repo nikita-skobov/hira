@@ -294,6 +294,21 @@ pub fn set_visibility(vis: &mut Visibility, is_pub: bool) {
     }
 }
 
+pub fn convert_to_snake_case(field: &str) -> String {
+    let mut out = "".to_string();
+    for c in field.chars() {
+        if c.is_ascii_alphabetic() && c.is_ascii_uppercase() {
+            if !out.is_empty() {
+                out.push('_');
+            }
+            out.push(c.to_ascii_lowercase());
+        } else {
+            out.push(c.to_ascii_lowercase());
+        }
+    }
+    out
+}
+
 pub fn parse_as_module_item(stream: TokenStream) -> Result<ItemMod, TokenStream> {
     let mod_def = syn::parse2::<ItemMod>(stream)
         .map_err(|e| compiler_error(&format!("Failed to parse as ItemMod. Hira expects modules to be only applied to rust modules\n{:?}", e)))?;
@@ -379,4 +394,15 @@ pub fn extract_default_attr(stream: TokenStream) -> Result<(String, TokenStream)
     // if the user makes an error here, it should be showed to them by their IDE/compiler.
     let rest_of_items: proc_macro2::TokenStream = items_iter.collect();
     Ok((path, rest_of_items))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_snakecase_works() {
+        let field_ty = "L0KvReader";
+        assert_eq!(convert_to_snake_case(field_ty), "l0_kv_reader");
+    }
 }
