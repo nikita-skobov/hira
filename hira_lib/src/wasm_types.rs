@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{str::FromStr, collections::HashSet};
 
 use proc_macro2::{TokenStream, Ident};
 use wasm_type_gen::*;
@@ -18,7 +18,7 @@ use crate::{
         DependencyConfig, DependencyType, DependencyTypeName, fill_dependency_config,
     },
     HiraConfig,
-    module_loading::HiraModule2
+    module_loading::{HiraModule2, OutputType}
 };
 
 // this is the data the end user passed to the macro, and we serialize it
@@ -133,8 +133,9 @@ pub struct LibraryObj {
 }
 
 impl LibraryObj {
-    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) {
-        self.l0_core.apply_changes(conf, module);
+    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
+        self.l0_core.apply_changes(conf, module)?;
+        Ok(())
     }
 }
 
@@ -150,7 +151,46 @@ impl L0Core {
         let kv_pairs = self.module_outputs.get_mut(mod_name)?;
         Some(kv_pairs.remove(key)?)
     }
-    pub fn apply_changes(&mut self, _conf: &mut HiraConfig, module: &mut HiraModule2) {
+    pub fn verify_outputs_and_set_defaults(&mut self, conf: &mut HiraConfig, all_transient_deps: HashSet<String>) -> Result<(), TokenStream> {
+        // visit all the transient dependencies, and insert their
+        // default const outputs if not already overridden dynamically
+        for dep in all_transient_deps {
+            if let Some(module) = conf.get_mod2(&dep) {
+                if !self.module_outputs.contains_key(&dep) {
+                    self.module_outputs.insert(dep.to_string(), Default::default());
+                }
+                if let Some(kv_pairs) = self.module_outputs.get_mut(&dep) {
+                    for output in module.outputs.iter() {
+                        if let OutputType::SpecificConst(k, v) = output {
+                            if !kv_pairs.contains_key(k) {
+                                kv_pairs.insert(k.to_string(), v.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (mod_name, kv_pairs) in self.module_outputs.iter_mut() {
+            let module = match conf.get_mod2(mod_name) {
+                Some(m) => m,
+                None => {
+                    return Err(compiler_error(&format!("Detected outputs from intermediate module {} but this module doesn't exist", mod_name)));
+                }
+            };
+            for (key, val) in kv_pairs.iter_mut() {
+                if !module.has_output(key) {
+                    return Err(compiler_error(&format!("Detected output '{}' from intermediate module {} but this module did not specify such an output", key, mod_name)));
+                }
+            }
+        }
+        Ok(())
+    }
+    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
+        let mut all_transient_deps = HashSet::new();
+        module.visit_lvl3_dependency_names(conf, &mut |dep_name| {
+            all_transient_deps.insert(dep_name.to_string());
+        });
+        self.verify_outputs_and_set_defaults(conf, all_transient_deps)?;
         for output in module.outputs.iter() {
             match output {
                 crate::module_loading::OutputType::AllFromModule(other_module_name) => {
@@ -165,9 +205,10 @@ impl L0Core {
                 // shouldnt be possible to set this because
                 // L3 modules cant use specific const outputs
                 // and only L3 modules get apply_changes called on it
-                crate::module_loading::OutputType::SpecificConst(_) => unreachable!(),
+                crate::module_loading::OutputType::SpecificConst(_, _) => unreachable!(),
             }
         }
+        Ok(())
     }
 }
 

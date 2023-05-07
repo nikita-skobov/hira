@@ -417,6 +417,73 @@ mod e2e_tests {
     }
 
     #[test]
+    fn mod2_outputs_must_exist_if_outputted() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0Core;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub region: String,
+                    }
+                    pub mod outputs {
+                        pub const REGION: &str = "";
+                    }
+                    pub fn config(input: &mut Input, l0core: &mut L0Core) {
+                        l0core.set_output("NOT_DEFINED", input.region.as_str());
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub mod outputs {
+                        pub use lvl2mod::outputs::*;
+                    }
+                    pub fn config(input: &mut lvl2mod::Input) {
+                        input.region = "us-east-2".to_string();
+                    }
+                }
+            ),
+        ];
+        let err = e2e_module2_run(&code, |_| {}).err().expect("Expected compilation to fail due to NOT_DEFINED");
+        let err_str = err.to_string();
+        assert_contains_str(err_str, "this module did not specify such an output");
+    }
+
+    #[test]
+    fn mod2_outputs_get_defaulted_if_not_set() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0Core;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub mod outputs {
+                        pub const REGION: &str = "eu-west-1";
+                    }
+                    pub fn config(input: &mut Input, l0core: &mut L0Core) {
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub mod outputs {
+                        pub use lvl2mod::outputs::*;
+                    }
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let conf = e2e_module2_run(&code, |_| {}).expect("Failed to compile");
+        let module = conf.get_mod2("mylevel3mod").expect("Failed to find mylevel3mod");
+        assert_eq!(module.resolved_outputs["REGION"], "eu-west-1");
+    }
+
+    #[test]
     fn wasm_evaluation_works() {
         let res = e2e_module_run(
             stringify!(

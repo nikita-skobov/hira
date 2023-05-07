@@ -87,8 +87,8 @@ pub enum OutputType {
     /// ```
     /// Only lvl2 modules are allowed to specify specific constant values.
     /// These can then be referenced by lvl3 modules explicitly. The string is just
-    /// the name of the constant ident, and it is implied that the dependency is self.
-    SpecificConst(String),
+    /// the name of the constant ident, and then the value. and it is implied that the dependency is self.
+    SpecificConst(String, String),
 }
 
 #[derive(Default, Debug)]
@@ -151,6 +151,44 @@ impl HiraModule2 {
                 Some(out.clone())
             }
         }
+    }
+
+    pub fn visit_dependencies_recursively(name: &str, conf: &HiraConfig, cb: &mut impl FnMut(&str)) {
+        if let Some(module) = conf.get_mod2(name) {
+            for dep in module.compile_dependencies.iter() {
+                match dep {
+                    DependencyTypeName::Mod1Or2(mod_name) => {
+                        cb(&mod_name);
+                        Self::visit_dependencies_recursively(&mod_name, conf, cb);
+                    }
+                    // these are ignored as theres nothing to visit
+                    DependencyTypeName::Library(_) => {}
+                }
+            }
+        }
+    }
+
+    pub fn visit_lvl3_dependency_names(&self, conf: &HiraConfig, cb: &mut impl FnMut(&str)) {
+        if let Some(dep_name) = &self.lvl3_module_depends_on {
+            cb(dep_name);
+            Self::visit_dependencies_recursively(&dep_name, conf, cb);
+        }
+    }
+
+    pub fn has_output(&self, k: &str) -> bool {
+        for output in self.outputs.iter() {
+            match output {
+                OutputType::SpecificConst(c, _) => {
+                    if c == k { return true }
+                }
+                // TODO: should L2 modules be allowed to do
+                // pub mod outputs { use other_module::outputs::*; }
+                // ?
+                // if so, need to recurse and do more lookups...
+                _ => {}
+            }
+        }
+        false
     }
 
     pub fn assert_level_3_and_set_depends_on(&mut self) -> Result<(), TokenStream> {
@@ -245,7 +283,7 @@ impl HiraModule2 {
             match self.level {
                 ModuleLevel::Level2 => {
                     // ensure L2 modules can only specify specific const outputs
-                    if self.outputs.iter().any(|x| if let OutputType::SpecificConst(_) = x { false } else { true }) {
+                    if self.outputs.iter().any(|x| if let OutputType::SpecificConst(_, _) = x { false } else { true }) {
                         return Err(compiler_error(&format!("Detected module {} as {:?}, but in its `mod outputs` section there are use statements. Only Level3 modules can specify use statements in its outputs section", self.name, self.level)));
                     }
                 }
@@ -259,7 +297,7 @@ impl HiraModule2 {
                     // and ensure that this level 2 module is the same one in its input config
                     for output in self.outputs.iter() {
                         match output {
-                            OutputType::SpecificConst(_) => {
+                            OutputType::SpecificConst(_, _) => {
                                 return Err(compiler_error(&format!("Detected module {} as {:?}, but in its `mod outputs` section there are const statements. Only Level2 modules can specify const statements in its outputs section", self.name, self.level)));
                             }
                             OutputType::AllFromModule(mod_name) | OutputType::SpecificFromModule(mod_name, _) => {
@@ -1032,7 +1070,7 @@ pub fn hira_mod2_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<Tok
         &pass_this
     ).unwrap_or_default();
 
-    lib_obj.apply_changes(conf, &mut module);
+    lib_obj.apply_changes(conf, &mut module)?;
     conf.modules2.insert(module.name.clone(), module);
     Ok(stream)
 }
@@ -1147,7 +1185,10 @@ pub fn set_outputs(module: &mut HiraModule2, item: &mut syn::ItemMod) {
     for item in item.content.as_mut().map(|x| &mut x.1).unwrap_or(&mut default_vec) {
         if let syn::Item::Const(c) = item {
             let name = get_ident_string(&c.ident);
-            module.outputs.push(OutputType::SpecificConst(name));
+            // TODO: actually check the type.. we should enforce that its a string.
+            let mut val = c.expr.to_token_stream().to_string();
+            remove_surrounding_quotes(&mut val);
+            module.outputs.push(OutputType::SpecificConst(name, val));
             continue;
         }
         if let syn::Item::Use(u) = item {
@@ -1349,7 +1390,7 @@ mod tests {
         let module = parse_module_from_stream(stream).expect("failed to parse test case as module");
         assert_eq!(module.outputs[0], OutputType::SpecificFromModule("something".to_string(), "specific".to_string()));
         assert_eq!(module.outputs[1], OutputType::AllFromModule("apples".to_string()));
-        assert_eq!(module.outputs[2], OutputType::SpecificConst("HELLO".to_string()));
+        assert_eq!(module.outputs[2], OutputType::SpecificConst("HELLO".to_string(), "dsa".to_string()));
     }
 
     #[test]
