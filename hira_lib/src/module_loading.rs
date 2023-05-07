@@ -132,6 +132,11 @@ pub struct HiraModule2 {
     /// the time we are processing this module, failure to resolve results in
     /// a compilation failure
     pub outputs: Vec<OutputType>,
+
+    /// after the wasm module runs, we have the final output key/values.
+    /// we set these in memory such that other modules that depend on these values can
+    /// reference them.
+    pub resolved_outputs: HashMap<String, String>,
 }
 
 impl HiraModule2 {
@@ -1018,7 +1023,6 @@ pub fn hira_mod2_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<Tok
     }
 
     let codes = get_wasm_code_to_compile2(conf, &module)?;
-    conf.modules2.insert(module.name.clone(), module);
 
     let mut pass_this = LibraryObj::new();
     // TODO: fill in library obj according to the required capabilities
@@ -1028,6 +1032,8 @@ pub fn hira_mod2_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<Tok
         &pass_this
     ).unwrap_or_default();
 
+    lib_obj.apply_changes(conf, &mut module);
+    conf.modules2.insert(module.name.clone(), module);
     Ok(stream)
 }
 

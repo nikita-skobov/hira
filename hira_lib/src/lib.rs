@@ -294,7 +294,7 @@ mod e2e_tests {
     use proc_macro2::TokenStream;
     use quote::ToTokens;
     use syn::ItemFn;
-    use crate::module_loading::{run_module_inner, load_module_from_file_string};
+    use crate::module_loading::{run_module_inner, load_module_from_file_string, hira_mod2_inner};
     use super::*;
 
     fn assert_contains_str<Q: AsRef<str>, S: AsRef<str>>(search: Q, contains: S) {
@@ -352,6 +352,24 @@ mod e2e_tests {
         Ok((conf, out))
     }
 
+    fn e2e_module2_run(
+        module_code: &[&str],
+        conf_cb: impl Fn(&mut HiraConfig),
+    ) -> Result<HiraConfig, TokenStream> {
+        let mut conf = HiraConfig::default();
+        conf.set_base_code();
+        conf.wasm_directory = "./test_out".to_string();
+        conf_cb(&mut conf);
+        for code in module_code {
+            let code = TokenStream::from_str(code).expect("Failed to parse test case code");
+            let out = hira_mod2_inner(&mut conf, code);
+            if let Err(e) = out {
+                return Err(e);
+            }
+        }
+        Ok(conf)
+    }
+
     fn e2e_module_run_reuse_config(
         conf: &mut HiraConfig,
         user_code: &str,
@@ -361,6 +379,41 @@ mod e2e_tests {
         let module = load_module_from_file_string(conf, "a", module_code.to_string()).expect("test case provided invalid module code");
         conf.loaded_modules.insert(module.name.clone(), module);
         run_module_inner(conf, item, attr)
+    }
+
+    #[test]
+    fn mod2_outputs_work() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0Core;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub region: String,
+                    }
+                    pub mod outputs {
+                        pub const REGION: &str = "";
+                    }
+                    pub fn config(input: &mut Input, l0core: &mut L0Core) {
+                        l0core.set_output("REGION", input.region.as_str());
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub mod outputs {
+                        pub use lvl2mod::outputs::*;
+                    }
+                    pub fn config(input: &mut lvl2mod::Input) {
+                        input.region = "us-east-2".to_string();
+                    }
+                }
+            ),
+        ];
+        let conf = e2e_module2_run(&code, |_| {}).expect("Failed to compile");
+        let module = conf.get_mod2("mylevel3mod").expect("Failed to find mylevel3mod");
+        assert_eq!(module.resolved_outputs["REGION"], "us-east-2");
     }
 
     #[test]

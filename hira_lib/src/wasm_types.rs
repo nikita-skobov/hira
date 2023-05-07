@@ -132,6 +132,44 @@ pub struct LibraryObj {
     pub l0_core: L0Core,
 }
 
+impl LibraryObj {
+    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) {
+        self.l0_core.apply_changes(conf, module);
+    }
+}
+
+impl L0Core {
+    pub fn drain_outputs_into(&mut self, mod_name: &str, existing: &mut std::collections::HashMap<String, String>) {
+        if let Some(mut kv_pairs) = self.module_outputs.remove(mod_name) {
+            for (key, val) in kv_pairs.drain() {
+                existing.insert(key, val);
+            }
+        }
+    }
+    pub fn remove_specific_output(&mut self, mod_name: &str, key: &str) -> Option<String> {
+        let kv_pairs = self.module_outputs.get_mut(mod_name)?;
+        Some(kv_pairs.remove(key)?)
+    }
+    pub fn apply_changes(&mut self, _conf: &mut HiraConfig, module: &mut HiraModule2) {
+        for output in module.outputs.iter() {
+            match output {
+                crate::module_loading::OutputType::AllFromModule(other_module_name) => {
+                    self.drain_outputs_into(&other_module_name, &mut module.resolved_outputs);
+                    break;
+                }
+                crate::module_loading::OutputType::SpecificFromModule(other_module_name, key) => {
+                    if let Some(val) = self.remove_specific_output(other_module_name, key) {
+                        module.resolved_outputs.insert(key.to_string(), val);
+                    }
+                }
+                // shouldnt be possible to set this because
+                // L3 modules cant use specific const outputs
+                // and only L3 modules get apply_changes called on it
+                crate::module_loading::OutputType::SpecificConst(_) => unreachable!(),
+            }
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum GlobalVariable {
