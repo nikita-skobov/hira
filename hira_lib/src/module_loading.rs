@@ -118,7 +118,7 @@ pub struct HiraModule2 {
     /// whereas `dependencies` tracks logical dependencies, `compile_dependencies`
     /// tracks actual dependencies required for compiling this as a wasm module.
     /// This field is set after parsing, as it requires verification that modules exist
-    pub compile_dependencies: HashSet<DependencyTypeName>,
+    pub compile_dependencies: Vec<DependencyTypeName>,
 
     /// if this is a level3 module, then we set this field to be the name of the level2
     /// module that this module referenced in its config function
@@ -197,11 +197,11 @@ impl HiraModule2 {
                 // parse out the module name
                 if let Some((first, _)) = s.split_once("::") {
                     let module_name = first.replace("& mut", "");
-                    self.compile_dependencies.insert(DependencyTypeName::Mod1Or2(module_name.trim().to_string()));
+                    self.compile_dependencies.push(DependencyTypeName::Mod1Or2(module_name.trim().to_string()));
                 }
             } else if after_mut.starts_with("L0") {
                 has_l0_deps = true;
-                self.compile_dependencies.insert(DependencyTypeName::Library(after_mut.trim().to_string()));
+                self.compile_dependencies.push(DependencyTypeName::Library(after_mut.trim().to_string()));
             }
         }
         // if any of the compile_dependencies start with L0, then this is a L1 module
