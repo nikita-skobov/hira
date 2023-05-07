@@ -72,6 +72,45 @@ pub fn iterate_expr_for_strings(
     }
 }
 
+/// callback takes 3 args:
+/// - list of all paths into the use tree in order left to right.
+/// - option of if this is a renamed item
+/// - boolean if the last component is a wildcard.
+pub fn iterate_item_tree(past_names: &mut Vec<String>, tree: &syn::UseTree, cb: &mut impl FnMut(&[String], Option<String>, bool)) {
+    match tree {
+        syn::UseTree::Name(n) => {
+            let name = get_ident_string(&n.ident);
+            past_names.push(name);
+            cb(&past_names, None, false);
+            past_names.pop();
+        }
+        syn::UseTree::Rename(n) => {
+            let name = get_ident_string(&n.ident);
+            let rename = get_ident_string(&n.rename);
+            past_names.push(name);
+            cb(&past_names, Some(rename), false);
+            past_names.pop();
+        }
+        syn::UseTree::Path(p) => {
+            let name = get_ident_string(&p.ident);
+            let len = past_names.len();
+            past_names.push(name);
+            iterate_item_tree(past_names, &p.tree, cb);
+            past_names.truncate(len);
+        }
+        syn::UseTree::Group(g) => {
+            for item in &g.items {
+                let len = past_names.len();
+                iterate_item_tree(past_names, item, cb);
+                past_names.truncate(len);
+            }
+        }
+        syn::UseTree::Glob(_) => {
+            cb(&past_names, None, true);
+        }
+    }
+}
+
 pub fn iterate_mod_def(
     module: &mut HiraModule2,
     mod_def: &mut ItemMod,
@@ -486,5 +525,27 @@ mod tests {
     fn to_snakecase_works() {
         let field_ty = "L0KvReader";
         assert_eq!(convert_to_snake_case(field_ty), "l0_kv_reader");
+    }
+
+    #[test]
+    fn iterating_item_tree_works() {
+        let tokens: TokenStream = "use hello::{world, something_else as xyz, third::*};".parse().unwrap();
+        let item_tree = syn::parse2::<ItemUse>(tokens).unwrap();
+        let mut outs = vec![];
+        let mut past_names = vec![];
+        iterate_item_tree(&mut past_names, &item_tree.tree, &mut |a, b, c| {
+            outs.push((a.to_vec(), b, c));
+        });
+        assert_eq!(outs[0].0, &["hello", "world"]);
+        assert_eq!(outs[0].1, None);
+        assert_eq!(outs[0].2, false);
+
+        assert_eq!(outs[1].0, &["hello", "something_else"]);
+        assert_eq!(outs[1].1, Some("xyz".to_string()));
+        assert_eq!(outs[1].2, false);
+
+        assert_eq!(outs[2].0, &["hello", "third"]);
+        assert_eq!(outs[2].1, None);
+        assert_eq!(outs[2].2, true);
     }
 }

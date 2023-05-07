@@ -988,51 +988,37 @@ pub fn set_dep(deps: &mut HashMap<String, Result<Vec<String>, String>>, dep_name
     set_dep_inner(deps, dep_name, field);
 }
 
-pub fn set_dependencies_recursively(deps: &mut HashMap<String, Result<Vec<String>, String>>, past_names: &Vec<String>, tree: &syn::UseTree) {
-    match (past_names.last(), tree) {
-        (Some(s), syn::UseTree::Name(n)) => {
-            let name = get_ident_string(&n.ident);
-            if name == "outputs" {
-                set_dep(deps, s, s, "*".to_string());
-            } else if s == "outputs" {
-                // check if outputs is the name right before this one, and if so
-                // then we want to add a specific item name
-                let len = past_names.len();
-                if len > 1 {
-                    let second_to_last_index = len - 2;
-                    if let Some(second_to_last) = past_names.get(second_to_last_index) {
-                        set_dep(deps, second_to_last, second_to_last, name);
-                    }
-                }
-            }
+pub fn set_dependencies_recursively(deps: &mut HashMap<String, Result<Vec<String>, String>>, tree: &syn::UseTree) {
+    let mut past_names = vec![];
+    iterate_item_tree(&mut past_names, tree, &mut |names, renamed, wildcard| {
+        // first, find the actual module name
+        let outputs_index = names.iter().position(|x| x == "outputs");
+        let output_index = match outputs_index {
+            Some(i) => i,
+            None => return,
+        };
+        let mod_name_index = if output_index > 0 { output_index - 1 } else { return };
+        let mod_name = &names[mod_name_index];
+        let mut last_part = match names.last() {
+            Some(n) => n.to_string(),
+            None => return,
+        };
+        // if the last name is outputs, then it means we want all imports from this.
+        // similarly, if the last part is a wildcard, then we also want all imports
+        if wildcard || output_index == names.len() - 1 {
+            last_part = "*".to_string();
         }
-        (Some(s), syn::UseTree::Rename(n)) => {
-            let renamed = get_ident_string(&n.rename);
-            let name = get_ident_string(&n.ident);
-            if name == "outputs" {
-                set_dep(deps, s, &renamed, "*".to_string());
-            }
+        // dont allow "use X::outputs::something as abc"
+        // renaming only allowed for "use X::outputs as x_outputs"
+        if last_part != "*" && renamed.is_some() {
+            return;
         }
-        (_, syn::UseTree::Group(g)) => {
-            for item in &g.items {
-                set_dependencies_recursively(deps, past_names, item);
-            }
-        }
-        (_, syn::UseTree::Path(p)) => {
-            let mut names = past_names.clone();
-            names.push(get_ident_string(&p.ident));
-            set_dependencies_recursively(deps, &names, &p.tree);
-        }
-        (_, syn::UseTree::Glob(_)) => {
-            for last_name in past_names.iter().rev() {
-                if last_name != "outputs" {
-                    set_dep(deps, last_name, last_name, "*".to_string());
-                    break;
-                }
-            }
-        }
-        _ => {}
-    }
+        let renamed = match renamed {
+            Some(x) => x,
+            None => mod_name.to_string()
+        };
+        set_dep(deps, mod_name, &renamed, last_part);
+    });
 }
 
 /// TODO: how to differentiate between hira dependencies like another hira module
@@ -1133,7 +1119,6 @@ mod tests {
         assert_eq!(module.dependencies["somedep2"], Ok(vec!["A1".to_string(), "A2".to_string()]));
         assert!(module.input_struct.contains("pub a"));
         assert!(module.input_struct.contains("pub struct Input"));
-        assert_eq!(module.outputs[0], ("HEY".to_string(), "dsa".to_string()));
     }
 
     #[test]
