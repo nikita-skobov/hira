@@ -482,4 +482,107 @@ mod e2e_tests {
         let module = conf.get_mod2("mylevel3mod").expect("Failed to find mylevel3mod");
         assert_eq!(module.resolved_outputs["REGION"], "eu-west-1");
     }
+
+    #[test]
+    fn mod2_outputs_not_set_if_explicit() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0Core;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub mod outputs {
+                        pub const REGION: &str = "eu-west-1";
+                        pub const OTHER_CONST: &str = "should not be set in mylevel3mod";
+                    }
+                    pub fn config(input: &mut Input, l0core: &mut L0Core) {
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub mod outputs {
+                        pub use lvl2mod::outputs::REGION;
+                    }
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let conf = e2e_module2_run(&code, |_| {}).expect("Failed to compile");
+        let module = conf.get_mod2("mylevel3mod").expect("Failed to find mylevel3mod");
+        assert_eq!(module.resolved_outputs["REGION"], "eu-west-1");
+        assert!(!module.resolved_outputs.contains_key("OTHER_CONST"));
+    }
+
+    #[test]
+    fn mod2_lvl2_mods_can_wrap_other_lvl2_mods() {
+        let code = [
+            // first lvl2mod
+            stringify!(
+                pub mod lvl2mod_a {
+                    use super::L0Core;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub mod outputs {
+                        pub const A1: &str = "lvlv2moda1";
+                        pub const A2: &str = "lvlv2moda2";
+                    }
+                    pub fn config(input: &mut Input, l0core: &mut L0Core) {
+                        l0core.set_output("A1", "hey!");
+                    }
+                }
+            ),
+            // 2nd lvl2mod
+            stringify!(
+                pub mod lvl2mod_b {
+                    use super::L0Core;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub mod outputs {
+                        pub const B1: &str = "lvlv2modb1";
+                        pub const B2: &str = "lvlv2modb2";
+                    }
+                    pub fn config(input: &mut Input, l0core: &mut L0Core) {}
+                }
+            ),
+            // the lvl2mod that the user uses:
+            stringify!(
+                pub mod lvl2mod_c {
+                    use super::L0Core;
+                    use super::{lvl2mod_a, lvl2mod_b};
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub mod outputs {
+                        pub use lvl2mod_a::outputs::*;
+                        pub use lvl2mod_b::outputs::*;
+                    }
+                    pub fn config(input: &mut Input, l0core: &mut L0Core, ainp: &mut lvl2mod_a::Input, binp: &mut lvl2mod_b::Input) {}
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod_c;
+                    pub mod outputs {
+                        pub use lvl2mod_c::outputs::*;
+                    }
+                    pub fn config(input: &mut lvl2mod_c::Input) {}
+                }
+            ),
+        ];
+        let conf = e2e_module2_run(&code, |_| {}).expect("Failed to compile");
+        let module = conf.get_mod2("mylevel3mod").expect("Failed to find mylevel3mod");
+        assert_eq!(module.resolved_outputs["B1"], "lvlv2modb1");
+        assert_eq!(module.resolved_outputs["B2"], "lvlv2modb2");
+        assert_eq!(module.resolved_outputs["A1"], "hey!");
+        assert_eq!(module.resolved_outputs["A2"], "lvlv2moda2");
+    }
 }

@@ -151,25 +151,48 @@ impl L0Core {
         let kv_pairs = self.module_outputs.get_mut(mod_name)?;
         Some(kv_pairs.remove(key)?)
     }
-    pub fn verify_outputs_and_set_defaults(&mut self, conf: &mut HiraConfig, all_transient_deps: HashSet<String>) -> Result<(), TokenStream> {
-        // visit all the transient dependencies, and insert their
-        // default const outputs if not already overridden dynamically
-        for dep in all_transient_deps {
-            if let Some(module) = conf.get_mod2(&dep) {
-                if !self.module_outputs.contains_key(&dep) {
-                    self.module_outputs.insert(dep.to_string(), Default::default());
-                }
-                if let Some(kv_pairs) = self.module_outputs.get_mut(&dep) {
-                    for output in module.outputs.iter() {
-                        if let OutputType::SpecificConst(k, v) = output {
-                            if !kv_pairs.contains_key(k) {
-                                kv_pairs.insert(k.to_string(), v.to_string());
+    pub fn set_defaults_recursively(&mut self, conf: &HiraConfig, dep_name: &str) {
+        if let Some(module) = conf.get_mod2(dep_name) {
+            if !self.module_outputs.contains_key(dep_name) {
+                self.module_outputs.insert(dep_name.to_string(), Default::default());
+            }
+            let mut insert = vec![];
+            for output in module.outputs.iter() {
+                match output {
+                    OutputType::AllFromModule(mod_name) => {
+                        self.set_defaults_recursively(conf, mod_name);
+                        if let Some(mod_outputs) = self.module_outputs.get(mod_name) {
+                            for (key, val) in mod_outputs.iter() {
+                                insert.push((key.to_string(), val.to_string()));
                             }
                         }
+                    }
+                    OutputType::SpecificFromModule(mod_name, key) => {
+                        self.set_defaults_recursively(conf, mod_name);
+                        if let Some(mod_outputs) = self.module_outputs.get(mod_name) {
+                            if let Some(val) = mod_outputs.get(key) {
+                                insert.push((key.to_string(), val.to_string()));
+                            }
+                        }
+                    }
+                    OutputType::SpecificConst(k, v) => {
+                        insert.push((k.to_string(), v.to_string()));
+                    }
+                }
+            }
+            if let Some(kv_pairs) = self.module_outputs.get_mut(dep_name) {
+                for (key, val) in insert {
+                    if !kv_pairs.contains_key(&key) {
+                        kv_pairs.insert(key, val);
                     }
                 }
             }
         }
+    }
+    pub fn verify_outputs_and_set_defaults(&mut self, conf: &mut HiraConfig, first_lvl2_dep: &str) -> Result<(), TokenStream> {
+        // visit all the transient dependencies, and insert their
+        // default const outputs if not already overridden dynamically
+        self.set_defaults_recursively(conf, first_lvl2_dep);
         for (mod_name, kv_pairs) in self.module_outputs.iter_mut() {
             let module = match conf.get_mod2(mod_name) {
                 Some(m) => m,
@@ -178,7 +201,7 @@ impl L0Core {
                 }
             };
             for (key, val) in kv_pairs.iter_mut() {
-                if !module.has_output(key) {
+                if !module.has_output(key, conf) {
                     return Err(compiler_error(&format!("Detected output '{}' from intermediate module {} but this module did not specify such an output", key, mod_name)));
                 }
             }
@@ -186,11 +209,8 @@ impl L0Core {
         Ok(())
     }
     pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
-        let mut all_transient_deps = HashSet::new();
-        module.visit_lvl3_dependency_names(conf, &mut |dep_name| {
-            all_transient_deps.insert(dep_name.to_string());
-        });
-        self.verify_outputs_and_set_defaults(conf, all_transient_deps)?;
+        let lvl2_dep_name = module.level3_get_depends_on(module.lvl3_module_depends_on.as_ref())?;
+        self.verify_outputs_and_set_defaults(conf, &lvl2_dep_name)?;
         for output in module.outputs.iter() {
             match output {
                 crate::module_loading::OutputType::AllFromModule(other_module_name) => {

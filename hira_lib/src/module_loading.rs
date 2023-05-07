@@ -175,17 +175,23 @@ impl HiraModule2 {
         }
     }
 
-    pub fn has_output(&self, k: &str) -> bool {
+    pub fn has_output(&self, k: &str, conf: &HiraConfig) -> bool {
         for output in self.outputs.iter() {
             match output {
                 OutputType::SpecificConst(c, _) => {
                     if c == k { return true }
                 }
-                // TODO: should L2 modules be allowed to do
-                // pub mod outputs { use other_module::outputs::*; }
-                // ?
-                // if so, need to recurse and do more lookups...
-                _ => {}
+                OutputType::AllFromModule(mod_name) => {
+                    if let Some(module) = conf.get_mod2(&mod_name) {
+                        if module.has_output(k, conf) {
+                            return true;
+                        }
+                    }
+                }
+                OutputType::SpecificFromModule(_, new_key) => {
+                    if new_key == k { return true }
+                }
+                
             }
         }
         false
@@ -281,12 +287,6 @@ impl HiraModule2 {
         // verify the shape of outputs is valid:
         if !self.outputs.is_empty() {
             match self.level {
-                ModuleLevel::Level2 => {
-                    // ensure L2 modules can only specify specific const outputs
-                    if self.outputs.iter().any(|x| if let OutputType::SpecificConst(_, _) = x { false } else { true }) {
-                        return Err(compiler_error(&format!("Detected module {} as {:?}, but in its `mod outputs` section there are use statements. Only Level3 modules can specify use statements in its outputs section", self.name, self.level)));
-                    }
-                }
                 ModuleLevel::Level3 => {
                     // it should be guaranteed at this point that we know the l2 dependency
                     // but just in case we unwrap w/ default
