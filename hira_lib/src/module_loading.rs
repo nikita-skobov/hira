@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
 use proc_macro2::TokenStream;
@@ -10,7 +10,7 @@ use crate::wasm_types::*;
 use wasm_type_gen::*;
 
 use super::HiraConfig;
-use super::parsing::{default_stream, compiler_error, iterate_file, iterate_expr_for_strings, get_list_of_strings};
+use super::parsing::{default_stream, compiler_error, iterate_file, iterate_expr_for_strings, get_list_of_strings, DependencyTypeName};
 use super::use_hira_config;
 
 pub const FN_ENTRYPOINT_NAME: &'static str = "wasm_entrypoint";
@@ -44,7 +44,25 @@ pub struct HiraModule {
     pub entrypoint_fn: Option<String>, // syn::Item::Fn
 }
 
-#[derive(Default)]
+#[derive(Debug, PartialEq)]
+pub enum ModuleLevel {
+    /// built into hira. not relevant for parsing
+    Level0,
+    /// use Level0 capabilities.
+    Level1,
+    /// cannot use Level0 capabilities. Can depend on multiple Level1 and Level2 modules
+    Level2,
+    /// Can only depend on 1 single Level 2 module. Can specify `mod outputs`
+    Level3,
+}
+
+impl Default for ModuleLevel {
+    fn default() -> Self {
+        Self::Level0
+    }
+}
+
+#[derive(Default, Debug)]
 pub struct HiraModule2 {
     pub name: String,
     pub contents: String,
@@ -62,6 +80,13 @@ pub struct HiraModule2 {
     /// example: if X comes after this current module, then hira in proc-macro
     /// mode cannot know anything about X, and therefore fails.
     pub dependencies: HashMap<String, Result<Vec<String>, String>>,
+
+    pub level: ModuleLevel,
+
+    /// whereas `dependencies` tracks logical dependencies, `compile_dependencies`
+    /// tracks actual dependencies required for compiling this as a wasm module.
+    /// This field is set after parsing, as it requires verification that modules exist
+    pub compile_dependencies: HashSet<DependencyTypeName>,
     /// List of names of fields that this module outputs to be
     /// used by other modules.
     /// can either be individual items inside
@@ -86,6 +111,62 @@ impl HiraModule2 {
                 Some(out.clone())
             }
         }
+    }
+
+    pub fn verify_config_signature(&mut self) -> Result<(), TokenStream> {
+        let mut has_l0_deps = false;
+        for s in self.config_fn_signature_inputs.iter() {
+            if s == "& mut Input" {
+                continue;
+            }
+            // if i == 0 && s != "& mut Input" {
+            //     return Err(compiler_error(&format!("First input param to config function must be your own Input item. Expected `fn config(&mut Input, ...)`, Found `fn config({}, ...)`", s)));
+            // }
+            // remove the &mut
+            let after_mut = s.replace("& mut", "");
+            let after_mut = after_mut.trim();
+            // the only valid options are:
+            // dependency structs which always are called Input,
+            // and library capabilities which always start with L0.
+            if after_mut.ends_with("Input") {
+                // parse out the module name
+                if let Some((first, _)) = s.split_once("::") {
+                    let module_name = first.replace("& mut", "");
+                    self.compile_dependencies.insert(DependencyTypeName::Mod1Or2(module_name.trim().to_string()));
+                }
+            } else if after_mut.starts_with("L0") {
+                has_l0_deps = true;
+                self.compile_dependencies.insert(DependencyTypeName::Library(after_mut.trim().to_string()));
+            }
+        }
+        // if any of the compile_dependencies start with L0, then this is a L1 module
+        // if this module has any exports, its a L3 module.
+        // it can also be an L3 module if it doesnt have an input struct
+        // if this module has more than 1 dependency, and its not an L1 module, then
+        // its a L2 module.
+        // otherwise, we assume L2
+        if has_l0_deps {
+            self.level = ModuleLevel::Level1;
+        } else if self.outputs.len() > 0 || self.input_struct.is_empty() {
+            self.level = ModuleLevel::Level3;
+        } else if self.config_fn_signature_inputs.len() > 1 {
+            self.level = ModuleLevel::Level2;
+        } else {
+            self.level = ModuleLevel::Level2;
+        }
+        Ok(())
+
+        // TODO: add capability checks, eg: module level2s arent allowed to use outputs,
+        // module level3s are only allowed to have 1 input param,
+        // module level1s cannot depend on level2s, etc.
+
+        // TODO:
+        // add check for input struct,
+        // ensure level3 does not have one.
+        // ensure other levels DO have one, and ensure it has a Default method
+        // scan its attributes for (Derive(Default)), impl w/ a default() signature, etc.
+
+        // TODO: module must be public if its a lvl1, or 2 module
     }
 }
 
@@ -820,11 +901,23 @@ pub fn hira_mod2(mut stream: TokenStream, mut _attr: TokenStream) -> TokenStream
     }
 }
 
-pub fn hira_mod2_inner(_conf: &mut HiraConfig, stream: TokenStream) -> Result<TokenStream, TokenStream> {
-    let _module = parse_module_from_stream(stream.clone())?;
+pub fn hira_mod2_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<TokenStream, TokenStream> {
+    let mut module = parse_module_from_stream(stream.clone())?;
+    module.verify_config_signature()?;
+
+    // only level3 modules get compiled into wasm
+    // all other modules get compiled as dependencies for a level3 module
+    // but theres no point to compile them all individually
+    if module.level != ModuleLevel::Level3 {
+        conf.modules2.insert(module.name.clone(), module);
+        return Ok(stream);
+    }
+
+    let codes = get_wasm_code_to_compile2(conf, &module)?;
+    conf.modules2.insert(module.name.clone(), module);
+
+
     // TODO:
-    // - verify module
-    // - add to the config
     // - run the module as wasm + dependencies
 
     Ok(stream)
@@ -1033,6 +1126,52 @@ mod tests {
         assert!(module.input_struct.contains("pub a"));
         assert!(module.input_struct.contains("pub struct Input"));
         assert_eq!(module.outputs[0], ("HEY".to_string(), "dsa".to_string()));
+    }
+
+    #[test]
+    fn mod2_verify_works() {
+        let code = r#"
+        mod hello_world {
+            pub struct Input {
+                pub a: u32,
+            }
+            mod outputs {
+                pub const HEY: &'static str = "dsa";
+            }
+            pub fn config(input: &mut Input) {
+
+            }
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let out = module.verify_config_signature();
+        assert!(out.is_ok());
+    }
+
+    #[test]
+    fn mod2_multiple_params_works() {
+        let code = r#"
+        mod hello_world {
+            pub struct Input {
+                pub a: u32,
+            }
+            mod outputs {
+                pub const HEY: &'static str = "dsa";
+            }
+            pub fn config(input: &mut Input, other: &mut other::Input, libobj: &mut L0Reader, somethingelse: &mut hello::Input) {
+
+            }
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let out = module.verify_config_signature();
+        assert!(out.is_ok());
+        assert_eq!(module.compile_dependencies.len(), 3);
+        assert!(module.compile_dependencies.contains(&DependencyTypeName::Mod1Or2("other".to_string())));
+        assert!(module.compile_dependencies.contains(&DependencyTypeName::Mod1Or2("hello".to_string())));
+        assert!(module.compile_dependencies.contains(&DependencyTypeName::Library("L0Reader".to_string())));
     }
 
     #[test]

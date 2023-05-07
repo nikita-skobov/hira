@@ -8,7 +8,7 @@ use proc_macro2::{
     TokenStream,
     TokenTree, Ident,
 };
-use quote::ToTokens;
+use quote::{quote, ToTokens, format_ident};
 use syn::{
     File,
     Item,
@@ -24,7 +24,7 @@ use syn::{
     Expr, ItemUse, Visibility, token::Pub, ItemMacro, ItemImpl
 };
 
-use crate::{module_loading::{HiraModule, HiraModule2}, wasm_types::{InputType, GlobalVariable}};
+use crate::{module_loading::{HiraModule, HiraModule2}, wasm_types::{InputType, GlobalVariable}, HiraConfig};
 
 pub fn default_stream() -> TokenStream {
     compiler_error("Failed to get hira config")
@@ -394,6 +394,84 @@ pub fn extract_default_attr(stream: TokenStream) -> Result<(String, TokenStream)
     // if the user makes an error here, it should be showed to them by their IDE/compiler.
     let rest_of_items: proc_macro2::TokenStream = items_iter.collect();
     Ok((path, rest_of_items))
+}
+
+
+#[derive(PartialEq, Eq, Hash, Debug)]
+pub enum DependencyTypeName {
+    Mod1Or2(String),
+    Library(String),
+}
+
+pub enum DependencyType {
+    Mod1or2(DependencyConfig),
+    Library(String),
+}
+
+pub struct DependencyConfig {
+    pub name: String,
+    pub deps: Vec<DependencyType>,
+}
+
+impl DependencyConfig {
+    pub fn config_calling_code(&self, first_config_ident: Ident) -> TokenStream {
+        let item_name = &self.name;
+        let item_name_ident = format_ident!("{}", item_name);
+        let mut config_lets = vec![];
+        let mut config_pass = vec![];
+        let mut recursive = vec![];
+        for (i, item) in self.deps.iter().enumerate() {
+            let conf_name = format_ident!("conf_{}_{}", item_name, i);
+            match item {
+                DependencyType::Mod1or2(x) => {
+                    let x_name = format_ident!("{}", x.name);
+                    config_lets.push(quote!{ let mut #conf_name = #x_name::Input::default(); });
+                    config_pass.push(quote!{ &mut #conf_name });
+                    recursive.push(x.config_calling_code(conf_name));
+                }
+                DependencyType::Library(x) => {
+                    let x_field_name = convert_to_snake_case(x);
+                    let x_name = format_ident!("{}", x_field_name);
+                    config_pass.push(quote!{ &mut library_obj.#x_name, });
+                }
+            };
+        }
+        quote! {
+            #(#config_lets)*
+            #item_name_ident::config(&mut #first_config_ident, #(#config_pass)*);
+
+            #(#recursive)*
+        }
+    }
+}
+
+pub fn fill_dependency_config(hira_conf: &HiraConfig, name: &str, dep_contents: &mut Vec<TokenStream>) -> Result<DependencyConfig, TokenStream> {
+    let dep_module = hira_conf.get_mod2(name)
+        .ok_or(compiler_error(&format!("Failed to find module {}, but this module has not been loaded yet", name)))?;
+    let mut out = DependencyConfig {
+        name: name.to_string(),
+        deps: vec![],
+    };
+    // TODO: add deduplication logic here. lvl2 modules
+    // can depend on other lvl2 modules so there could be a circular dependency.
+    // which is fine! but we just have to ensure we dont emit the code multiple times.
+    let contents_stream = TokenStream::from_str(&dep_module.contents)
+        .map_err(|e| compiler_error(&format!("Failed to parse module {} as token stream\n{:?}", name, e)))?;
+    dep_contents.push(contents_stream);
+
+    for dep in dep_module.compile_dependencies.iter() {
+        let dep_type = match dep {
+            DependencyTypeName::Mod1Or2(s) => {
+                let conf = fill_dependency_config(hira_conf, &s, dep_contents)?;
+                DependencyType::Mod1or2(conf)
+            }
+            DependencyTypeName::Library(s) => {
+                DependencyType::Library(s.clone())
+            }
+        };
+        out.deps.push(dep_type);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

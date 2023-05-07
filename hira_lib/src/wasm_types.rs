@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use proc_macro2::TokenStream;
+use proc_macro2::{TokenStream, Ident};
 use wasm_type_gen::*;
 use syn::{
     ItemFn,
@@ -12,7 +12,14 @@ use syn::{
 };
 use quote::{quote, format_ident, ToTokens};
 
-use crate::parsing::{is_public, remove_surrounding_quotes, rename_ident, set_visibility};
+use crate::{
+    parsing::{
+        is_public, remove_surrounding_quotes, rename_ident, set_visibility, compiler_error, convert_to_snake_case,
+        DependencyConfig, DependencyType, DependencyTypeName, fill_dependency_config,
+    },
+    HiraConfig,
+    module_loading::HiraModule2
+};
 
 // this is the data the end user passed to the macro, and we serialize it
 // and pass it to the wasm module that the user specified
@@ -103,7 +110,11 @@ pub struct LibraryObj {
     // pub dependencies: Vec<String>,
 
     // everything below is a level0 capability for modulesV2:
-    pub kv_reader: L0KvReader,
+    // NOTE: these MUST be named in the same way
+    // as the struct, but in snake_case. The wasm code generator
+    // will only see the type name "L0KvReader" and will
+    // convert it to snake case
+    pub l0_kv_reader: L0KvReader,
 }
 
 
@@ -359,7 +370,7 @@ impl LibraryObj {
             // shared_state: Default::default(),
             // dependencies: Default::default(),
 
-            kv_reader: L0KvReader::new(),
+            l0_kv_reader: L0KvReader::new(),
         }
     }
     // #[allow(dead_code)]
@@ -522,6 +533,101 @@ pub fn get_wasm_output(
     let out = run_wasm(&wasm_file, data_to_pass.to_binary_slice()).expect("runtime error running wasm");
     LibraryObj::from_binary_slice(out)
 }
+
+
+pub fn get_wasm_code_to_compile2(
+    hira_conf: &HiraConfig,
+    hira_module_lvl3: &HiraModule2
+) -> Result<[(String, String); 3], TokenStream> {
+    let mut dependency_mod_defs = vec![];
+    let mut dependency_config: Option<DependencyConfig> = None;
+    for dep in hira_module_lvl3.compile_dependencies.iter() {
+        if let DependencyTypeName::Mod1Or2(name) = dep {
+            let out = fill_dependency_config(hira_conf, name, &mut dependency_mod_defs)?;
+            dependency_config = Some(out);
+        }
+    }
+    let dependency_config = match dependency_config {
+        None => return Err(compiler_error("Failed to find dependency config")),
+        Some(c) => c,
+    };
+
+    let hira_base_code = hira_conf.hira_base_code.clone();
+    let module_code = quote! {
+        extern crate hira_base;
+        use hira_base::*;
+
+        #(#dependency_mod_defs)*
+    };
+    let users_code = get_wasm_code_to_compile_lvl3(
+        hira_module_lvl3.name.clone(), hira_module_lvl3.contents.clone(), dependency_config
+    );
+
+    let module_code = module_code.to_string();
+    let users_code = users_code.to_string();
+
+    Ok([
+        ("hira_base".to_string(), hira_base_code),
+        ("dependencies".to_string(), module_code),
+        (hira_module_lvl3.name.to_string(), users_code),
+    ])
+}
+
+pub fn get_wasm_code_to_compile_lvl3(
+    lvl3module_name: String,
+    lvl3module_def: String,
+    lvl2module: DependencyConfig
+) -> TokenStream {
+    let mod3name = format_ident!("{}", lvl3module_name);
+    let mod2name = format_ident!("{}", lvl2module.name);
+    let conf0 = format_ident!("conf_0");
+
+    let mod2_calling_code = lvl2module.config_calling_code(conf0.clone());
+    let lvl3mod_tokens = TokenStream::from_str(&lvl3module_def).expect("Failed to parse lvl3 module def as tokens");
+
+    quote! {
+        extern crate hira_base;
+        extern crate dependencies;
+        use hira_base::LibraryObj;
+        use dependencies::*;
+
+        #lvl3mod_tokens
+
+        #[no_mangle]
+        pub fn wasm_main(library_obj: &mut LibraryObj) {
+            let mut #conf0 = #mod2name::Input::default();
+            #mod3name::config(&mut #conf0);
+
+            #mod2_calling_code
+        }
+
+        extern "C" {
+            fn get_entrypoint_alloc_size() -> u32;
+            fn get_entrypoint_data(ptr : * const u8, len : u32);
+            fn set_entrypoint_data(ptr : * const u8, len : u32);
+        }
+
+        #[no_mangle]
+        pub extern fn wasm_entrypoint() -> u32 {
+            let mut input_obj = unsafe {
+                let len = get_entrypoint_alloc_size() as usize ; let mut data : Vec <
+                u8 > = Vec :: with_capacity(len) ; data.set_len(len) ; let ptr =
+                data.as_ptr() ; let len = data.len() ;
+                get_entrypoint_data(ptr, len as _) ; match LibraryObj ::
+                from_binary_slice(data) { Some(s) => s, None => return 1, }
+            };
+            unsafe {
+                let _ = wasm_main(& mut input_obj) ;
+                let out_data = input_obj.to_binary_slice() ; let ptr =
+                out_data.as_ptr() ; let len = out_data.len() ;
+                set_entrypoint_data(ptr, len as _) ;
+            }
+            0
+        }
+    }
+}
+
+
 
 /// given the user's wasm module, the wasm module's exported name,
 /// the user's attribute (their callback), and the required modules for this module,
