@@ -81,6 +81,10 @@ pub fn iterate_mod_def(
     mod_callbacks: &[fn(&mut HiraModule2, &mut ItemMod)],
 ) {
     module.name = get_ident_string(&mod_def.ident);
+    module.is_pub = match mod_def.vis {
+        Visibility::Public(_) => true,
+        _ => false,
+    };
 
     let mut default_vec = vec![];
     let content = mod_def.content.as_mut().map(|x| &mut x.1).unwrap_or(&mut default_vec);

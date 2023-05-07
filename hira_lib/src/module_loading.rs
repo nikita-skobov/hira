@@ -67,6 +67,7 @@ pub struct HiraModule2 {
     pub name: String,
     pub contents: String,
     pub config_fn_signature_inputs: Vec<String>,
+    pub is_pub: bool,
     pub input_struct: String,
     /// List of names of fields + module names that this
     /// module depends on. For example can be a single module
@@ -154,7 +155,12 @@ impl HiraModule2 {
         } else {
             self.level = ModuleLevel::Level2;
         }
-        Ok(())
+
+        if self.level != ModuleLevel::Level3 && !self.is_pub {
+            return Err(compiler_error(
+                &format!("Detected module {} as {:?}, but it is not marked public. Level1 and Level2 modules must be public", self.name, self.level)
+            ));
+        }
 
         // TODO: add capability checks, eg: module level2s arent allowed to use outputs,
         // module level3s are only allowed to have 1 input param,
@@ -167,6 +173,8 @@ impl HiraModule2 {
         // scan its attributes for (Derive(Default)), impl w/ a default() signature, etc.
 
         // TODO: module must be public if its a lvl1, or 2 module
+
+        Ok(())
     }
 }
 
@@ -1131,7 +1139,7 @@ mod tests {
     #[test]
     fn mod2_verify_works() {
         let code = r#"
-        mod hello_world {
+        pub mod hello_world {
             pub struct Input {
                 pub a: u32,
             }
@@ -1152,7 +1160,7 @@ mod tests {
     #[test]
     fn mod2_multiple_params_works() {
         let code = r#"
-        mod hello_world {
+        pub mod hello_world {
             pub struct Input {
                 pub a: u32,
             }
@@ -1172,6 +1180,22 @@ mod tests {
         assert!(module.compile_dependencies.contains(&DependencyTypeName::Mod1Or2("other".to_string())));
         assert!(module.compile_dependencies.contains(&DependencyTypeName::Mod1Or2("hello".to_string())));
         assert!(module.compile_dependencies.contains(&DependencyTypeName::Library("L0Reader".to_string())));
+    }
+
+    #[test]
+    fn mod2_non_lvl3_must_be_pub() {
+        let code = r#"
+        mod hello_world {
+            pub struct Input { pub a: u32 }
+            pub fn config(input: &mut Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let out = module.verify_config_signature();
+        assert!(out.is_err());
+        let err = out.err().unwrap().to_string();
+        assert!(err.contains("must be public"));
     }
 
     #[test]
