@@ -64,7 +64,7 @@ impl Default for ModuleLevel {
 #[derive(Debug, PartialEq)]
 pub enum OutputType {
     /// corresponds to doing:
-    /// ```
+    /// ```rust,ignore
     /// mod outputs {
     ///     use some_lvlv2::outputs::*;
     /// }
@@ -72,7 +72,7 @@ pub enum OutputType {
     /// In this case we just store the name of the lvl2 dependency
     AllFromModule(String),
     /// corresponds to doing:
-    /// ```
+    /// ```rust,ignore
     /// mod outputs {
     ///     use some_lvlv2::outputs::{A, B, C};
     /// }
@@ -80,7 +80,7 @@ pub enum OutputType {
     /// in this case we specify (some_lvl2, A), (some_lvl2, B), (some_lvl2, C)
     SpecificFromModule(String, String),
     /// corresponds to doing:
-    /// ```
+    /// ```rust,ignore
     /// mod outputs {
     ///     const SOME_OUTPUT: &'str = "hi";
     /// }
