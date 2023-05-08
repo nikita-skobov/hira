@@ -6,7 +6,7 @@ use quote::{quote, format_ident, ToTokens};
 use syn::{parse_file, ItemUse};
 
 use crate::parsing::{remove_surrounding_quotes, get_input_type, parse_callback_required_module, extract_default_attr, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree};
-use crate::wasm_types::*;
+use crate::{wasm_types::*, level0::*};
 use wasm_type_gen::*;
 
 use super::HiraConfig;
@@ -846,8 +846,9 @@ pub fn run_module_include_only(conf: &mut HiraConfig, stream: TokenStream) -> Re
     }
 
     let mut include_str = LibraryObj::include_in_rs_wasm();
-    include_str.push_str(user_data_impl());
-    include_str.push_str(lib_obj_impl());
+    for s in get_include_string() {
+        include_str.push_str(s);
+    }
     let include_tokens = proc_macro2::TokenStream::from_str(&include_str).unwrap_or_default();
     let parsing_tokens = proc_macro2::TokenStream::from_str(WASM_PARSING_TRAIT_STR).unwrap_or_default();
     let out = quote! {

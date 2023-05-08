@@ -6,11 +6,13 @@ use parsing::compiler_error;
 use proc_macro2::TokenStream;
 use toml::Table;
 use wasm_type_gen::{WasmIncludeString, WASM_PARSING_TRAIT_STR};
-use wasm_types::{MapEntry, LibraryObj, lib_obj_impl, kv_obj_impl, core_obj_impl, file_obj_impl};
+use wasm_types::MapEntry;
+use level0::*;
 
 pub mod parsing;
 pub mod module_loading;
 pub mod wasm_types;
+pub mod level0;
 
 use crate::module_loading::load_module;
 
@@ -59,11 +61,9 @@ impl HiraConfig {
     fn set_base_code(&mut self) {
         let mut hira_base = LibraryObj::include_in_rs_wasm();
         hira_base.push_str(WASM_PARSING_TRAIT_STR);
-        hira_base.push_str(lib_obj_impl());
-        // hira_base.push_str(user_data_impl());
-        hira_base.push_str(kv_obj_impl());
-        hira_base.push_str(core_obj_impl());
-        hira_base.push_str(file_obj_impl());
+        for s in get_include_string() {
+            hira_base.push_str(s);
+        }
         self.hira_base_code = hira_base;
     }
 
