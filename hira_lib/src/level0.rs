@@ -102,8 +102,8 @@ impl L0AppendFile {
         let mut all_allowed_files = HashSet::new();
         for dep in all_transient_deps.iter() {
             if let Some(dep_module) = conf.get_mod2(dep) {
-                for file in dep_module.file_capabilities.iter() {
-                    all_allowed_files.insert(file);
+                if let Some(allowed_files) = dep_module.get_capability_params("FILES") {
+                    all_allowed_files.extend(allowed_files);
                 }
             }
         }

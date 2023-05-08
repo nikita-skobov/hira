@@ -41,6 +41,27 @@ pub fn compiler_error(msg: &str) -> TokenStream {
     out
 }
 
+pub fn iterate_tuples(expr: &Expr, cb: &mut impl FnMut(String, &Expr)) {
+    match expr {
+        Expr::Array(array) => {
+            for elem in array.elems.iter() {
+                iterate_tuples(elem, cb);
+            }
+        }
+        Expr::Reference(r) => {
+            iterate_tuples(&*r.expr, cb);
+        }
+        Expr::Tuple(tuple) if tuple.elems.len() == 2 => {
+            if let syn::Expr::Lit(l) = &tuple.elems[0] {
+                let mut s1 = l.to_token_stream().to_string();
+                remove_surrounding_quotes(&mut s1);
+                cb(s1, &tuple.elems[1]);
+            }
+        }
+        _ => (),
+    }
+}
+
 /// in a few places in hira we let the module writer specify some array of values
 /// which we parse out the strings. This function is generic over that iteration
 /// and calls the callback with anytime we find a string

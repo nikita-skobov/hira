@@ -5,7 +5,7 @@ use proc_macro2::TokenStream;
 use quote::{quote, format_ident, ToTokens};
 use syn::{parse_file, ItemUse};
 
-use crate::parsing::{remove_surrounding_quotes, get_input_type, parse_callback_required_module, extract_default_attr, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree};
+use crate::parsing::{remove_surrounding_quotes, get_input_type, parse_callback_required_module, extract_default_attr, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples};
 use crate::{wasm_types::*, level0::*};
 use wasm_type_gen::*;
 
@@ -19,7 +19,7 @@ pub const REQUIRED_CRATES_NAME: &'static str = "REQUIRED_CRATES";
 pub const REQUIRED_HIRA_MODS_NAME: &'static str = "REQUIRED_HIRA_MODULES";
 pub const HIRA_MOD_NAME_NAME: &'static str = "HIRA_MODULE_NAME";
 pub const EXPORT_ITEM_NAME: &'static str = "ExportType";
-pub const FILE_CAPABILITIES_NAME: &'static str = "FILES";
+pub const CAPABILITY_PARAMS_NAME: &'static str = "CAPABILITY_PARAMS";
 
 #[derive(Debug)]
 pub enum LoadedFrom {
@@ -140,10 +140,20 @@ pub struct HiraModule2 {
     /// reference them.
     pub resolved_outputs: HashMap<String, String>,
 
-    pub file_capabilities: Vec<String>,
+    /// a map of the name of the capability to a list of values
+    /// that this module needs for that capability. it's generic on purpose
+    /// such that level0 modules can expand on top of this functionality
+    /// and can define their own custom keywords/semantics
+    pub capability_params: HashMap<String, Vec<String>>,
 }
 
 impl HiraModule2 {
+    pub fn get_capability_params(&self, capability_name: &str) -> Option<&Vec<String>> {
+        if let Some(list) = self.capability_params.get(capability_name) {
+            return Some(list);
+        }
+        None
+    }
     pub fn get_dependencies(&self, s: &str) -> Option<Vec<String>> {
         let entry = self.dependencies.get(s)?;
         match entry {
@@ -1096,12 +1106,19 @@ pub fn set_config_fn_sig(module: &mut HiraModule2, item: &mut syn::ItemFn) {
     }
 }
 
-pub fn set_file_capability(module: &mut HiraModule2, item: &mut syn::ItemConst) {
-    if item.ident.to_string() != FILE_CAPABILITIES_NAME {
+pub fn set_capability_params(module: &mut HiraModule2, item: &mut syn::ItemConst) {
+    if item.ident.to_string() != CAPABILITY_PARAMS_NAME {
         return;
     }
-    iterate_expr_for_strings(&*item.expr, |a| {
-        module.file_capabilities.push(a);
+    iterate_tuples(&*item.expr, &mut |key, val| {
+        if !module.capability_params.contains_key(&key) {
+            module.capability_params.insert(key.to_string(), vec![]);
+        }
+        if let Some(list) = module.capability_params.get_mut(&key) {            
+            iterate_expr_for_strings(val, |a| {
+                list.push(a);
+            });
+        }
     });
 }
 
@@ -1240,7 +1257,7 @@ pub fn parse_module_from_stream(stream: TokenStream) -> Result<HiraModule2, Toke
         &[set_input_item_struct],
         &[set_dependencies],
         &[set_outputs],
-        &[set_file_capability],
+        &[set_capability_params],
     );
     Ok(hira_mod)
 }
@@ -1307,12 +1324,12 @@ mod tests {
 
     #[test]
     fn mod2_file_permissions_get_set_correctly() {
-        let code = r#"pub const FILES: &[&str] = &["hello.txt"];"#;
+        let code = r#"pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[("FILES", &["hello.txt"])];"#;
         let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
         let mut item = syn::parse2::<ItemConst>(stream).unwrap();
         let mut module = HiraModule2::default();
-        set_file_capability(&mut module, &mut item);
-        assert_eq!(module.file_capabilities[0], "hello.txt");
+        set_capability_params(&mut module, &mut item);
+        assert_eq!(module.capability_params["FILES"][0], "hello.txt");
     }
 
     #[test]

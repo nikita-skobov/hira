@@ -493,7 +493,7 @@ mod e2e_tests {
                 pub mod lvl2mod {
                     use super::L0AppendFile;
 
-                    pub const FILES: &[&str] = &["hello.txt"];
+                    pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[("FILES", &["hello.txt"])];
 
                     #[derive(Default)]
                     pub struct Input {
