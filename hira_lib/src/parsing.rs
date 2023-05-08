@@ -500,13 +500,13 @@ impl DependencyConfig {
                 DependencyType::Library(x) => {
                     let x_field_name = convert_to_snake_case(x);
                     let x_name = format_ident!("{}", x_field_name);
+                    config_lets.push(quote!{ library_obj.set_current_module(#item_name); });
                     config_pass.push(quote!{ &mut library_obj.#x_name, });
                 }
             };
         }
         quote! {
             #(#config_lets)*
-            library_obj.l0_core.set_current_module(#item_name);
             #item_name_ident::config(&mut #first_config_ident, #(#config_pass)*);
 
             #(#recursive)*

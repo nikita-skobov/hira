@@ -68,12 +68,14 @@ pub struct SharedOutputEntry {
 
 #[derive(WasmTypeGen, Debug, Default)]
 pub struct L0KvReader {
+    current_module_name: String,
     data: std::collections::HashMap<String, String>,
 }
 
 #[derive(WasmTypeGen, Debug, Default)]
 pub struct L0AppendFile {
     shared_output_data: Vec<SharedOutputEntry>,
+    current_module_name: String,
 }
 
 #[derive(WasmTypeGen, Debug, Default)]
@@ -223,7 +225,7 @@ impl L0Core {
 #[output_and_stringify_basic_const(FILE_IMPL)]
 impl L0AppendFile {
     pub fn new() -> Self {
-        Self { shared_output_data: Default::default() }
+        Self { shared_output_data: Default::default(), current_module_name: Default::default() }
     }
 
     /// given a file name (no paths. the file will appear in ./wasmgen/{filename})
@@ -281,7 +283,7 @@ impl L0AppendFile {
 #[output_and_stringify_basic_const(KV_IMPL)]
 impl L0KvReader {
     pub fn new() -> Self {
-        Self { data: Default::default() }
+        Self { current_module_name: Default::default(), data: Default::default() }
     }
 
     // TODO: this capability is only supposed to be allowed to read...
@@ -300,14 +302,7 @@ impl L0Core {
             current_module_name: Default::default(),
         }
     }
-    // this is used by the code generator to ensure
-    // that when each module's config function is called, this
-    // sets the name such that if that module calls
-    // "set_output", then it gets properly set into the module_outputs field
-    #[doc(hidden)]
-    pub fn set_current_module(&mut self, name: &str) {
-        self.current_module_name = name.to_string();
-    }
+
     /// set an output from your module. The key should correspond to
     /// the name of one of your outputs in your `mod outputs { }` section.
     /// case matters.
@@ -335,6 +330,17 @@ impl LibraryObj {
             l0_core: L0Core::new(),
             l0_append_file: L0AppendFile::new(),
         }
+    }
+
+    // this is used by the code generator to ensure
+    // that when each module's config function is called, this
+    // sets the name such that if that module calls
+    // "set_output", then it gets properly set into the module_outputs field
+    #[doc(hidden)]
+    pub fn set_current_module(&mut self, name: &str) {
+        self.l0_append_file.current_module_name = name.to_string();
+        self.l0_core.current_module_name = name.to_string();
+        self.l0_kv_reader.current_module_name = name.to_string();
     }
 }
 
