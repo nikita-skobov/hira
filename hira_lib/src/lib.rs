@@ -551,7 +551,39 @@ mod e2e_tests {
             ),
         ];
         let res = e2e_module2_run(&code,|_| {});
-        let _conf = res.ok().unwrap();
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn mod2_fn_signature_not_provided_if_not_requested() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0CodeReader;
+
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub fn config(input: &mut Input, l0: &mut L0CodeReader) {
+                        let opt = l0.get_fn("hello_world");
+                        if opt.is_some() {
+                            panic!("test failed because i expected to not get hello_world");
+                        }
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+
+                    pub fn hello_world() {}
+                }
+            ),
+        ];
+        let res = e2e_module2_run(&code,|_| {});
+        assert!(res.is_ok());
     }
 
     #[test]
