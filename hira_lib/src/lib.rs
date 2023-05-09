@@ -521,6 +521,40 @@ mod e2e_tests {
     }
 
     #[test]
+    fn mod2_can_provide_requested_fn_signatures() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0CodeReader;
+
+                    pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[
+                        ("CODE_READ", &["fn:hello_world"])
+                    ];
+
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub fn config(input: &mut Input, l0: &mut L0CodeReader) {
+                        // test will fail if this unwrap panics:
+                        l0.get_fn("hello_world").unwrap();
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+
+                    pub fn hello_world() {}
+                }
+            ),
+        ];
+        let res = e2e_module2_run(&code,|_| {});
+        let _conf = res.ok().unwrap();
+    }
+
+    #[test]
     fn mod2_requires_file_permissions_to_be_defined_statically() {
         let code = [
             stringify!(

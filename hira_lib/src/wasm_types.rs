@@ -22,6 +22,17 @@ use crate::{
     level0::*,
 };
 
+#[derive(WasmTypeGen, Debug, Default)]
+pub struct FunctionSignature {
+    pub name: String,
+    pub is_pub: bool,
+    pub is_async: bool,
+    pub is_unsafe: bool,
+    pub is_const: bool,
+    pub inputs: Vec<UserInput>,
+    pub return_ty: String,
+}
+
 // this is the data the end user passed to the macro, and we serialize it
 // and pass it to the wasm module that the user specified
 #[derive(WasmTypeGen, Debug)]

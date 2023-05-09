@@ -1,9 +1,10 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, str::FromStr};
 
 use proc_macro2::TokenStream;
+use syn::{ItemMod, ItemFn};
 use wasm_type_gen::*;
 
-use crate::{HiraConfig, module_loading::{HiraModule2, OutputType}, parsing::compiler_error, wasm_types::to_map_entry};
+use crate::{HiraConfig, module_loading::{HiraModule2, OutputType}, parsing::{compiler_error, iterate_mod_def, iterate_mod_def_generic, parse_fn_signature}, wasm_types::{to_map_entry, FunctionSignature}};
 
 
 #[derive(WasmTypeGen, Debug, Default)]
@@ -40,6 +41,8 @@ pub struct LibraryObj {
     pub l0_core: L0Core,
 
     pub l0_append_file: L0AppendFile,
+
+    pub l0_code_reader: L0CodeReader,
 }
 
 
@@ -52,6 +55,7 @@ impl LibraryObj {
     pub fn initialize_capabilities(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
         // core doesnt need any initialization (for now)
         self.l0_append_file.initialize_capabilities(conf, module)?;
+        self.l0_code_reader.initialize_capabilities(conf, module)?;
         Ok(())
     }
 }
@@ -85,6 +89,77 @@ pub struct L0Core {
     current_module_name: String,
 }
 
+#[derive(WasmTypeGen, Debug, Default)]
+pub struct L0CodeReader {
+    current_module_name: String,
+    function_signatures: std::collections::HashMap<String, FunctionSignature>,
+}
+
+#[derive(Default, Debug)]
+struct FillCodeReader {
+    function_signatures: std::collections::HashMap<String, FunctionSignature>,
+    requested_fns: HashSet<String>,
+}
+
+fn set_functions(filler: &mut FillCodeReader, item: &mut ItemFn) {
+    let name = item.sig.ident.to_string();
+    if !filler.requested_fns.contains(&name) { return }
+
+    let sig = parse_fn_signature(item);
+    filler.function_signatures.insert(name, sig);
+}
+
+impl L0CodeReader {
+    pub fn initialize_capabilities(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
+        // find all transient modules that might have requested code read abilities
+        let mut all_transient_deps = HashSet::new();
+        module.visit_lvl3_dependency_names(&conf, &mut |dep| {
+            all_transient_deps.insert(dep.to_string());
+        });
+        // find all the requested function signatures across all modules:
+        let mut function_signature_set = HashSet::new();
+        for dep in all_transient_deps.iter() {
+            if let Some(module) = conf.get_mod2(dep) {
+                if let Some(params) = module.get_capability_params("CODE_READ") {
+                    for p in params {
+                        if let Some((key, val)) = p.split_once(":") {
+                            match key {
+                                "fn" => {
+                                    function_signature_set.insert(val.to_string());
+                                },
+                                x => {
+                                    return Err(compiler_error(&format!("Module {} requested READ_CODE capability of an unknown type '{}'", dep, x)));
+                                }
+                            }
+                        } else {
+                            return Err(compiler_error(&format!("Module {} requested READ_CODE capability with an unknown syntax '{}'\nExpected to find something like 'fn:function_name'", dep, p)));
+                        }
+                    }
+                }
+            }
+        }
+        // get all function signatures of this lvl3 module that match all_fn_names
+        let tokens = TokenStream::from_str(&module.contents)
+            .map_err(|e| compiler_error(&format!("failed to parse module contents as a... module? {:?}", e)))?;
+        let mut mod_def = syn::parse2::<ItemMod>(tokens)
+            .map_err(|e| compiler_error(&format!("failed to parse module contents as a... module? {:?}", e)))?;
+
+        let mut filler = FillCodeReader::default();
+        filler.requested_fns = function_signature_set;
+        iterate_mod_def_generic(
+            &mut filler,
+            &mut mod_def,
+            &[set_functions],
+            &[],
+            &[],
+            &[],
+            &[]
+        );
+        self.function_signatures = filler.function_signatures;
+
+        Ok(())
+    }
+}
 
 impl L0AppendFile {
     pub fn initialize_capabilities(&mut self, _conf: &mut HiraConfig, _module: &mut HiraModule2) -> Result<(), TokenStream> {
@@ -321,17 +396,20 @@ impl L0Core {
 }
 
 
+
+#[output_and_stringify_basic_const(CODE_READER_IMPL)]
+impl L0CodeReader {
+    pub fn new() -> Self {
+        Self { current_module_name: Default::default(), function_signatures: Default::default() }
+    }
+    pub fn get_fn(&self, name: &str) -> Option<&FunctionSignature> {
+        self.function_signatures.get(name)
+    }
+}
+
+
 #[output_and_stringify_basic_const(LIBRARY_OBJ_IMPL)]
 impl LibraryObj {
-    #[allow(dead_code)]
-    pub fn new() -> Self {
-        Self {
-            l0_kv_reader: L0KvReader::new(),
-            l0_core: L0Core::new(),
-            l0_append_file: L0AppendFile::new(),
-        }
-    }
-
     // this is used by the code generator to ensure
     // that when each module's config function is called, this
     // sets the name such that if that module calls
@@ -342,10 +420,23 @@ impl LibraryObj {
         self.l0_core.current_module_name = name.to_string();
         self.l0_kv_reader.current_module_name = name.to_string();
     }
+
+    // if adding a new l0 functionality,
+    // remember to add a `output_and_stringify_basic_const`
+    // and add the stringified impl section to `get_include_string`
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        Self {
+            l0_kv_reader: L0KvReader::new(),
+            l0_core: L0Core::new(),
+            l0_append_file: L0AppendFile::new(),
+            l0_code_reader: L0CodeReader::new(),
+        }
+    }
 }
 
 pub fn get_include_string() -> &'static [&'static str] {
     &[
-        LIBRARY_OBJ_IMPL, FILE_IMPL, CORE_IMPL, KV_IMPL,
+        LIBRARY_OBJ_IMPL, FILE_IMPL, CORE_IMPL, KV_IMPL, CODE_READER_IMPL,
     ]
 }

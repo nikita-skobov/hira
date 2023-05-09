@@ -24,7 +24,7 @@ use syn::{
     Expr, ItemUse, Visibility, token::Pub, ItemMacro, ItemImpl
 };
 
-use crate::{module_loading::{HiraModule, HiraModule2, ModuleLevel}, wasm_types::{InputType, GlobalVariable}, HiraConfig};
+use crate::{module_loading::{HiraModule, HiraModule2, ModuleLevel}, wasm_types::{InputType, GlobalVariable, FunctionSignature, UserInput}, HiraConfig};
 
 pub fn default_stream() -> TokenStream {
     compiler_error("Failed to get hira config")
@@ -59,6 +59,46 @@ pub fn iterate_tuples(expr: &Expr, cb: &mut impl FnMut(String, &Expr)) {
             }
         }
         _ => (),
+    }
+}
+
+pub fn parse_fn_signature(item: &ItemFn) -> FunctionSignature {
+    let mut name = item.sig.ident.to_string();
+    remove_surrounding_quotes(&mut name);
+    let mut inputs = vec![];
+    for input in item.sig.inputs.iter() {
+        let usr_field = UserInput {
+            is_self: match input {
+                syn::FnArg::Receiver(_) => true,
+                syn::FnArg::Typed(_) => false,
+            },
+            name: match input {
+                syn::FnArg::Receiver(_) => "&self".into(),
+                syn::FnArg::Typed(ty) => ty.pat.to_token_stream().to_string(),
+            },
+            ty: match input {
+                syn::FnArg::Receiver(_) => "".into(),
+                syn::FnArg::Typed(ty) => ty.ty.to_token_stream().to_string(),
+            }
+        };
+        inputs.push(usr_field);
+    }
+    let return_ty = match &item.sig.output {
+        syn::ReturnType::Default => "".into(),
+        syn::ReturnType::Type(_, b) => b.to_token_stream().to_string(),
+    };
+
+    FunctionSignature {
+        name,
+        is_pub: match item.vis {
+            Visibility::Public(_) => true,
+            _ => false,
+        },
+        is_async: item.sig.asyncness.is_some(),
+        is_unsafe: item.sig.unsafety.is_some(),
+        is_const: item.sig.constness.is_some(),
+        inputs,
+        return_ty,
     }
 }
 
@@ -148,6 +188,49 @@ pub fn iterate_item_tree(past_names: &mut Vec<String>, tree: &syn::UseTree, cb: 
     }
 }
 
+pub fn iterate_mod_def_generic<T>(
+    thing: &mut T,
+    mod_def: &mut ItemMod,
+    fn_callbacks: &[fn(&mut T, &mut ItemFn)],
+    struct_callbacks: &[fn(&mut T, &mut ItemStruct)],
+    use_callbacks: &[fn(&mut T, &mut ItemUse)],
+    mod_callbacks: &[fn(&mut T, &mut ItemMod)],
+    const_callbacks: &[fn(&mut T, &mut ItemConst)],
+) {
+    let mut default_vec = vec![];
+    let content = mod_def.content.as_mut().map(|x| &mut x.1).unwrap_or(&mut default_vec);
+    for item in content {
+        match item {
+            Item::Fn(x) => {
+                for cb in fn_callbacks {
+                    cb(thing, x);
+                }
+            }
+            Item::Mod(x) => {
+                for cb in mod_callbacks {
+                    cb(thing, x);
+                }
+            }
+            Item::Struct(x) => {
+                for cb in struct_callbacks {
+                    cb(thing, x);
+                }
+            }
+            Item::Use(x) => {
+                for cb in use_callbacks {
+                    cb(thing, x);
+                }
+            }
+            Item::Const(x) => {
+                for cb in const_callbacks {
+                    cb(thing, x);
+                }
+            }
+            _ => {},
+        }
+    }
+}
+
 pub fn iterate_mod_def(
     module: &mut HiraModule2,
     mod_def: &mut ItemMod,
@@ -163,38 +246,7 @@ pub fn iterate_mod_def(
         _ => false,
     };
 
-    let mut default_vec = vec![];
-    let content = mod_def.content.as_mut().map(|x| &mut x.1).unwrap_or(&mut default_vec);
-    for item in content {
-        match item {
-            Item::Fn(x) => {
-                for cb in fn_callbacks {
-                    cb(module, x);
-                }
-            }
-            Item::Mod(x) => {
-                for cb in mod_callbacks {
-                    cb(module, x);
-                }
-            }
-            Item::Struct(x) => {
-                for cb in struct_callbacks {
-                    cb(module, x);
-                }
-            }
-            Item::Use(x) => {
-                for cb in use_callbacks {
-                    cb(module, x);
-                }
-            }
-            Item::Const(x) => {
-                for cb in const_callbacks {
-                    cb(module, x);
-                }
-            }
-            _ => {},
-        }
-    }
+    iterate_mod_def_generic(module, mod_def, fn_callbacks, struct_callbacks, use_callbacks, mod_callbacks, const_callbacks);
 
     module.contents = mod_def.to_token_stream().to_string();
 }
