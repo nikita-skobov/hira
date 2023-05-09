@@ -2,6 +2,7 @@ use std::{collections::HashSet, str::FromStr};
 
 use proc_macro2::TokenStream;
 use syn::{ItemMod, ItemFn};
+use quote::quote;
 use wasm_type_gen::*;
 
 use crate::{HiraConfig, module_loading::{HiraModule2, OutputType}, parsing::{compiler_error, iterate_mod_def, iterate_mod_def_generic, parse_fn_signature}, wasm_types::{to_map_entry, FunctionSignature}};
@@ -47,9 +48,9 @@ pub struct LibraryObj {
 
 
 impl LibraryObj {
-    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
-        self.l0_core.apply_changes(conf, module)?;
-        self.l0_append_file.apply_changes(conf, module)?;
+    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
+        self.l0_core.apply_changes(conf, module, stream)?;
+        self.l0_append_file.apply_changes(conf, module, stream)?;
         Ok(())
     }
     pub fn initialize_capabilities(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
@@ -85,6 +86,7 @@ pub struct L0AppendFile {
 #[derive(WasmTypeGen, Debug, Default)]
 pub struct L0Core {
     compiler_error_message: String,
+    compiler_warning_message: String,
     module_outputs: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
     current_module_name: String,
 }
@@ -168,7 +170,7 @@ impl L0AppendFile {
         // put data in this struct, and then we verify that its valid when we leave the wasm context.
         Ok(())
     }
-    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
+    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
         let mut all_transient_deps = HashSet::new();
         module.visit_lvl3_dependency_names(&conf, &mut |dep| {
             all_transient_deps.insert(dep.to_string());
@@ -272,7 +274,15 @@ impl L0Core {
         }
         Ok(())
     }
-    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
+    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
+        // apply compiler error if any
+        if !self.compiler_error_message.is_empty() {
+            let add = format!("mod _hira_generated_error {{ fn _err() {{ compile_error!(r#\"{}\"#); }} }}", self.compiler_error_message);
+            let add_tokens = TokenStream::from_str(&add)
+                .map_err(|e| compiler_error(&format!("Failed to generate compiler error {:?}", e)))?;
+            stream.extend(add_tokens);
+        }
+
         let lvl2_dep_name = module.level3_get_depends_on(module.lvl3_module_depends_on.as_ref())?;
         self.verify_outputs_and_set_defaults(conf, &lvl2_dep_name)?;
         for output in module.outputs.iter() {
@@ -373,6 +383,7 @@ impl L0Core {
     pub fn new() -> Self {
         Self {
             compiler_error_message: Default::default(),
+            compiler_warning_message: Default::default(),
             module_outputs: Default::default(),
             current_module_name: Default::default(),
         }
@@ -391,6 +402,12 @@ impl L0Core {
                 map.insert(key.to_string(), val.to_string());
                 self.module_outputs.insert(self.current_module_name.clone(), map);
             }
+        }
+    }
+
+    pub fn compiler_error(&mut self, err: &str) {
+        if self.compiler_error_message.is_empty() {
+            self.compiler_error_message = err.to_string();
         }
     }
 }

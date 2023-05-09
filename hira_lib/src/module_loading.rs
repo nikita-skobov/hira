@@ -1063,7 +1063,7 @@ pub fn hira_mod2(mut stream: TokenStream, mut _attr: TokenStream) -> TokenStream
     }
 }
 
-pub fn hira_mod2_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<TokenStream, TokenStream> {
+pub fn hira_mod2_inner(conf: &mut HiraConfig, mut stream: TokenStream) -> Result<TokenStream, TokenStream> {
     let mut module = parse_module_from_stream(stream.clone())?;
     module.verify_config_signature()?;
 
@@ -1086,7 +1086,7 @@ pub fn hira_mod2_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<Tok
         &pass_this
     ).unwrap_or_default();
 
-    lib_obj.apply_changes(conf, &mut module)?;
+    lib_obj.apply_changes(conf, &mut module, &mut stream)?;
     conf.modules2.insert(module.name.clone(), module);
     Ok(stream)
 }

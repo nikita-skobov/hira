@@ -359,18 +359,32 @@ mod e2e_tests {
         module_code: &[&str],
         conf_cb: impl Fn(&mut HiraConfig),
     ) -> Result<HiraConfig, TokenStream> {
+        let res = e2e_module2_run_with_token_stream(module_code, conf_cb)?;
+        Ok(res.0)
+    }
+
+    fn e2e_module2_run_with_token_stream(
+        module_code: &[&str],
+        conf_cb: impl Fn(&mut HiraConfig),
+    ) -> Result<(HiraConfig, TokenStream), TokenStream> {
         let mut conf = HiraConfig::default();
         conf.set_base_code();
         conf.wasm_directory = "./test_out".to_string();
         conf_cb(&mut conf);
+        let mut stream = TokenStream::new();
         for code in module_code {
             let code = TokenStream::from_str(code).expect("Failed to parse test case code");
             let out = hira_mod2_inner(&mut conf, code);
-            if let Err(e) = out {
-                return Err(e);
+            match out {
+                Ok(s) => {
+                    stream = s;
+                }
+                Err(e) => {
+                    return Err(e);
+                }
             }
         }
-        Ok(conf)
+        Ok((conf, stream))
     }
 
     fn e2e_module_run_reuse_config(
@@ -518,6 +532,35 @@ mod e2e_tests {
         let mut conf = res.ok().unwrap();
         let data = conf.get_shared_file_data("hello.txt").expect("Failed to find hello.txt");
         assert_eq!(data, "a\nline3\nline4\nb\nline1\nline2\n");
+    }
+
+
+    #[test]
+    fn mod2_can_output_compiler_errors() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0Core;
+
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub fn config(input: &mut Input, l0core: &mut L0Core) {
+                        l0core.compiler_error("this is a custom error");
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let (_, stream) = e2e_module2_run_with_token_stream(&code, |_| {}).expect("Test case compilation failed");
+        let stream_text = stream.to_string();
+        assert_contains_str(stream_text, "this is a custom error");
     }
 
     #[test]
