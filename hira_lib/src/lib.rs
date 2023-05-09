@@ -564,6 +564,34 @@ mod e2e_tests {
     }
 
     #[test]
+    fn mod2_can_output_compiler_warnings() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0Core;
+
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub fn config(input: &mut Input, l0core: &mut L0Core) {
+                        l0core.compiler_warning("this is a custom warning");
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let (_, stream) = e2e_module2_run_with_token_stream(&code, |_| {}).expect("Test case compilation failed");
+        let stream_text = stream.to_string();
+        assert_contains_str(stream_text, "this is a custom warning");
+    }
+
+    #[test]
     fn mod2_can_provide_requested_fn_signatures() {
         let code = [
             stringify!(

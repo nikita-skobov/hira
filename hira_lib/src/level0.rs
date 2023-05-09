@@ -282,6 +282,14 @@ impl L0Core {
                 .map_err(|e| compiler_error(&format!("Failed to generate compiler error {:?}", e)))?;
             stream.extend(add_tokens);
         }
+        // apply compiler warning if any
+        if !self.compiler_warning_message.is_empty() {
+            self.compiler_warning_message = format!("\n{}", self.compiler_warning_message);
+            let add = format!("mod _hira_generated_warning {{ #[deprecated(note = r#\"{}\"#)]pub fn hira_generated_warning() {{}}\n fn _hira_use_warning() {{ hira_generated_warning() }} }}", self.compiler_warning_message);
+            let add_tokens = TokenStream::from_str(&add)
+                .map_err(|e| compiler_error(&format!("Failed to generate compiler warning {:?}", e)))?;
+            stream.extend(add_tokens);
+        }
 
         let lvl2_dep_name = module.level3_get_depends_on(module.lvl3_module_depends_on.as_ref())?;
         self.verify_outputs_and_set_defaults(conf, &lvl2_dep_name)?;
@@ -408,6 +416,12 @@ impl L0Core {
     pub fn compiler_error(&mut self, err: &str) {
         if self.compiler_error_message.is_empty() {
             self.compiler_error_message = err.to_string();
+        }
+    }
+
+    pub fn compiler_warning(&mut self, msg: &str) {
+        if self.compiler_warning_message.is_empty() {
+            self.compiler_warning_message = msg.to_string();
         }
     }
 }
