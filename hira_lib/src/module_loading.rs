@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
+use serde::{Serialize, Deserialize};
+
 use proc_macro2::TokenStream;
 use quote::{quote, format_ident, ToTokens};
 use syn::{parse_file, ItemUse};
@@ -45,7 +47,7 @@ pub struct HiraModule {
     pub entrypoint_fn: Option<String>, // syn::Item::Fn
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum ModuleLevel {
     /// built into hira itself
     Level1,
@@ -62,7 +64,7 @@ impl Default for ModuleLevel {
 }
 
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum OutputType {
     /// corresponds to doing:
     /// ```rust,ignore
@@ -92,7 +94,7 @@ pub enum OutputType {
     SpecificConst(String, String),
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub struct HiraModule2 {
     pub name: String,
     pub contents: String,
@@ -148,6 +150,28 @@ pub struct HiraModule2 {
 }
 
 impl HiraModule2 {
+    pub fn get_cached_json_path(module_name: &str, cache_dir: &str) -> String {
+        format!("{}/{}.json", cache_dir, module_name)
+    }
+    pub fn cache_to_disk(&self, cache_dir: &str) {
+        // ensure the directory exists:
+        let _ = std::fs::create_dir_all(cache_dir);
+        let write_to = Self::get_cached_json_path(&self.name, cache_dir);
+        if let Ok(serialized)  = serde_json::to_string(&self) {
+            let _ = std::fs::write(write_to, serialized);
+        }
+    }
+    pub fn load_from_cache(cache_dir: &str, name: &str) -> Result<Self, TokenStream> {
+        let file_path = Self::get_cached_json_path(name, cache_dir);
+        let err = |e| {
+            compiler_error(&format!("Failed to load dependant module '{}' from cache file {}\n{:?}", name, file_path, e))
+        };
+        let contents = std::fs::read_to_string(&file_path)
+            .map_err(|e| err(e))?;
+        let obj: Self = serde_json::from_str(&contents)
+            .map_err(|e| err(e.into()))?;
+        Ok(obj)
+    }
     pub fn get_capability_params(&self, capability_name: &str) -> Option<&Vec<String>> {
         if let Some(list) = self.capability_params.get(capability_name) {
             return Some(list);
@@ -239,7 +263,27 @@ impl HiraModule2 {
         Ok(l2_dep_name.to_string())
     }
 
-    pub fn verify_config_signature(&mut self) -> Result<(), TokenStream> {
+    /// given a level3 module, iterate through all its dependencies
+    /// and verify the hira config has them loaded, and if not:
+    /// try to load them from cache
+    pub fn verify_dependencies_exist_or_load(&mut self, conf: &mut HiraConfig) -> Result<(), TokenStream> {
+        // find all transient modules that might have requested code read abilities
+        let mut all_transient_deps = HashSet::new();
+        self.visit_lvl3_dependency_names(&conf, &mut |dep| {
+            all_transient_deps.insert(dep.to_string());
+        });
+        // iterate over all dependencies and try to load them if they dont exist
+        for dep in all_transient_deps {
+            if conf.modules2.contains_key(&dep) { continue; }
+
+            // havent loaded this dependency yet. try to load from cache:
+            let loaded = Self::load_from_cache(&conf.module_cache_directory, &dep)?;
+            conf.modules2.insert(loaded.name.to_string(), loaded);
+        }
+        Ok(())
+    }
+
+    pub fn verify_config_signature(&mut self, conf: &mut HiraConfig) -> Result<(), TokenStream> {
         let mut has_l0_deps = false;
         for s in self.config_fn_signature_inputs.iter() {
             if s == "& mut Input" {
@@ -286,6 +330,7 @@ impl HiraModule2 {
 
         if self.level == ModuleLevel::Level3 {
             self.assert_level_3_and_set_depends_on()?;
+            self.verify_dependencies_exist_or_load(conf)?;
         }
 
         // TODO: add capability checks, eg: module level2s arent allowed to use outputs,
@@ -1065,12 +1110,15 @@ pub fn hira_mod2(mut stream: TokenStream, mut _attr: TokenStream) -> TokenStream
 
 pub fn hira_mod2_inner(conf: &mut HiraConfig, mut stream: TokenStream) -> Result<TokenStream, TokenStream> {
     let mut module = parse_module_from_stream(stream.clone())?;
-    module.verify_config_signature()?;
+    module.verify_config_signature(conf)?;
 
     // only level3 modules get compiled into wasm
     // all other modules get compiled as dependencies for a level3 module
     // but theres no point to compile them all individually
     if module.level != ModuleLevel::Level3 {
+        // cache it in case this module is needed as a dependency
+        // in another crate
+        module.cache_to_disk(&conf.module_cache_directory);
         conf.modules2.insert(module.name.clone(), module);
         return Ok(stream);
     }
@@ -1267,6 +1315,8 @@ pub fn parse_module_from_stream(stream: TokenStream) -> Result<HiraModule2, Toke
 mod tests {
     use syn::ItemConst;
 
+    use crate::e2e_tests::assert_contains_str;
+
     use super::*;
 
     #[test]
@@ -1349,7 +1399,8 @@ mod tests {
         "#;
         let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
         let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
-        let out = module.verify_config_signature();
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
         assert!(out.is_ok());
     }
 
@@ -1370,7 +1421,8 @@ mod tests {
         "#;
         let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
         let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
-        let out = module.verify_config_signature();
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
         assert!(out.is_ok());
         assert_eq!(module.compile_dependencies.len(), 3);
         assert!(module.compile_dependencies.contains(&DependencyTypeName::Mod1Or2("other".to_string())));
@@ -1388,7 +1440,8 @@ mod tests {
         "#;
         let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
         let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
-        let out = module.verify_config_signature();
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
         assert!(out.is_err());
         let err = out.err().unwrap().to_string();
         assert!(err.contains("must be public"));
@@ -1406,10 +1459,12 @@ mod tests {
         "#;
         let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
         let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
-        let out = module.verify_config_signature();
+        let mut conf = HiraConfig::default();
+        conf.modules2.insert("l2_dep".to_string(), Default::default());
+        let out = module.verify_config_signature(&mut conf);
         assert!(out.is_err());
         let err = out.err().unwrap().to_string();
-        assert!(err.contains("Expected to only see use statements from Level2 module l2_dep, but found some_other_dep"));
+        assert_contains_str(err, "Expected to only see use statements from Level2 module l2_dep, but found some_other_dep");
     }
 
     #[test]

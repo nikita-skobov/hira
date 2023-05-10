@@ -29,6 +29,12 @@ pub struct HiraConfig {
     pub modules_directory: String,
     pub wasm_directory: String,
     pub gen_directory: String,
+    /// this directory is in the user's target/ folder.
+    /// its purpose is to cache the module source code such that
+    /// if the user loads a dependency from another crate, as long as that
+    /// dependency had the hira macro, then its source code gets
+    /// saved, and then we can fetch it from the cache directory
+    pub module_cache_directory: String,
 
     pub should_do_file_ops: bool,
     pub known_cargo_dependencies: HashSet<String>,
@@ -234,11 +240,13 @@ impl HiraConfig {
 
     fn set_directories(&mut self) {
         let base_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(".".into());
+        let target_dir = std::env::var("CARGO_HOME").unwrap_or(".".into());
         self.cargo_directory = base_dir;
         self.hira_directory = format!("{}/{HIRA_DIR_NAME}", self.cargo_directory);
         self.modules_directory = format!("{}/{HIRA_MODULES_DIR_NAME}", self.hira_directory);
         self.wasm_directory = format!("{}/{HIRA_WASM_DIR_NAME}", self.hira_directory);
         self.gen_directory = format!("{}/{HIRA_GEN_DIR_NAME}", self.hira_directory);
+        self.module_cache_directory = format!("{}/{HIRA_DIR_NAME}/cached_modules", target_dir);
     }
 
     pub fn get_module(&mut self, module_name: &str) -> Result<&HiraModule, String> {
@@ -292,7 +300,7 @@ pub fn use_hira_config(mut cb: impl FnMut(&mut HiraConfig)) {
 }
 
 #[cfg(test)]
-mod e2e_tests {
+pub mod e2e_tests {
     use std::str::FromStr;
     use proc_macro2::TokenStream;
     use quote::ToTokens;
@@ -300,7 +308,7 @@ mod e2e_tests {
     use crate::module_loading::{run_module_inner, load_module_from_file_string, hira_mod2_inner};
     use super::*;
 
-    fn assert_contains_str<Q: AsRef<str>, S: AsRef<str>>(search: Q, contains: S) {
+    pub fn assert_contains_str<Q: AsRef<str>, S: AsRef<str>>(search: Q, contains: S) {
         let search = search.as_ref();
         let contains = contains.as_ref();
         let contains_true = search.contains(contains);

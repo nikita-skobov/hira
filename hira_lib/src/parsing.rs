@@ -4,6 +4,8 @@
 
 use std::str::FromStr;
 
+use serde::{Serialize, Deserialize};
+
 use proc_macro2::{
     TokenStream,
     TokenTree, Ident,
@@ -535,7 +537,7 @@ pub fn extract_default_attr(stream: TokenStream) -> Result<(String, TokenStream)
 }
 
 
-#[derive(PartialEq, Eq, Hash, Debug)]
+#[derive(PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum DependencyTypeName {
     Mod1Or2(String),
     Library(String),
