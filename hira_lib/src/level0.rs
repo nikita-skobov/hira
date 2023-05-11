@@ -1,8 +1,8 @@
 use std::{collections::{HashSet, HashMap}, str::FromStr};
 
 use proc_macro2::TokenStream;
-use syn::{ItemMod, ItemFn, Signature};
-use quote::quote;
+use syn::{ItemMod, ItemFn, Signature, Item};
+use quote::{quote, ToTokens};
 use wasm_type_gen::*;
 
 use crate::{HiraConfig, module_loading::{HiraModule2, OutputType}, parsing::{compiler_error, iterate_mod_def, iterate_mod_def_generic, parse_fn_signature}, wasm_types::{to_map_entry, FunctionSignature}};
@@ -104,8 +104,7 @@ pub struct L0CodeReader {
 #[derive(WasmTypeGen, Debug, Default)]
 pub struct L0CodeWriter {
     current_module_name: String,
-    in_module_functions: std::collections::HashMap<String, std::collections::HashMap::<String, String>>,
-    global_functions: std::collections::HashMap<String, std::collections::HashMap::<String, String>>,
+    functions: std::collections::HashMap<String, std::collections::HashMap::<String, String>>,
 }
 
 #[derive(Default, Debug)]
@@ -155,7 +154,7 @@ impl L0CodeWriter {
     }
     pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
         // skip expensive calculations if theres nothing to output
-        if self.global_functions.is_empty() && self.in_module_functions.is_empty() {
+        if self.functions.is_empty() {
             return Ok(());
         }
 
@@ -172,9 +171,23 @@ impl L0CodeWriter {
             }
         }
 
-        for (requestor, map) in self.global_functions.iter() {
+        // parse the stream back to a module so we can add stuff inside it if requested:
+        let mut mod_def = syn::parse2::<ItemMod>(stream.clone())
+            .map_err(|e| compiler_error(&format!("Failed to parse stream as module for {}\n{:?}", module.name, e)))?;
+        let mut add_after = vec![];
+        let contents = if let Some(contents) = &mut mod_def.content {
+            &mut contents.1
+        } else {
+            return Err(compiler_error(&format!("Failed to find contents for module {}", module.name)));
+        };
+
+        for (requestor, map) in self.functions.iter() {
             if let Some(requestor_allowed) = allowed_global_fn_map.get(requestor) {
-                for (signature, body) in map {
+                for (sig, body) in map {
+                    let (sig_type, signature) = match sig.split_once("|") {
+                        Some(x) => x,
+                        None => continue,
+                    };
                     // first, parse the fn_signature
                     let full_fn = format!("{} {{ {} }}", signature, body);
                     let tokens = TokenStream::from_str(&full_fn)
@@ -184,17 +197,31 @@ impl L0CodeWriter {
                     let sig = parse_fn_signature(&item_fn);
                     let fn_name = &sig.name;
                     // check if this requestor is allowed to write this function:
-                    let desired_capability = format!("fn_global:{}", fn_name);
+                    let desired_capability = if sig_type == "global" {
+                        format!("fn_global:{}", fn_name)
+                    } else {
+                        format!("fn_module:{}", fn_name)
+                    };
                     if !requestor_allowed.contains(&&desired_capability) {
                         return Err(compiler_error(&format!("Module {} attempted to write global function {} but no {} capability was defined", requestor, fn_name, desired_capability)));
                     }
-                    // add it after the module def:
-                    stream.extend([tokens]);
+                    if sig_type == "global" {
+                        // add it after the module def:
+                        add_after.push(tokens);
+                    } else {
+                        // otherwise, add it inside the module def:
+                        contents.push(Item::Fn(item_fn));
+                    }
                 }
             } else {
                 return Err(compiler_error(&format!("Module {} attempted to write a function, but no CODE_WRITE capability found", requestor)));
             }
         }
+
+        // now put it back together
+        let mut out_stream = mod_def.to_token_stream();
+        out_stream.extend(add_after);
+        *stream = out_stream;
         Ok(())
     }
 }
@@ -520,24 +547,27 @@ impl L0CodeReader {
 #[output_and_stringify_basic_const(CODE_WRITER_IMPL)]
 impl L0CodeWriter {
     pub fn new() -> Self {
-        Self { current_module_name: Default::default(), in_module_functions: Default::default(), global_functions: Default::default() }
+        Self { current_module_name: Default::default(), functions: Default::default() }
     }
-    pub fn write_inside_module_fn(&mut self, sig: String, body: String) {
-        // self.in_module_functions.insert(sig, body);
-        if !self.in_module_functions.contains_key(&self.current_module_name) {
-            self.in_module_functions.insert(self.current_module_name.to_string(), Default::default());
+    /// given a function signature and a function body, write
+    /// this function inside the user's module. ie: this is internal
+    /// to the user's module.
+    pub fn write_internal_fn(&mut self, sig: String, body: String) {
+        self.write_function(sig, body, "module");
+    }
+    fn write_function(&mut self, sig: String, body: String, prefix: &str) {
+        if !self.functions.contains_key(&self.current_module_name) {
+            self.functions.insert(self.current_module_name.to_string(), Default::default());
         }
-        if let Some(map) = self.in_module_functions.get_mut(&self.current_module_name) {
-            map.insert(sig, body);
+        if let Some(map) = self.functions.get_mut(&self.current_module_name) {
+            map.insert(format!("{}|{}", prefix, sig), body);
         }
     }
+    /// given a function signature and a function body, write
+    /// this function outside the user's module. ie: this will be
+    /// callable globally
     pub fn write_global_fn(&mut self, sig: String, body: String) {
-        if !self.global_functions.contains_key(&self.current_module_name) {
-            self.global_functions.insert(self.current_module_name.to_string(), Default::default());
-        }
-        if let Some(map) = self.global_functions.get_mut(&self.current_module_name) {
-            map.insert(sig, body);
-        }
+        self.write_function(sig, body, "global");
     }
 }
 

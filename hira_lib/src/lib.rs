@@ -630,6 +630,43 @@ pub mod e2e_tests {
     }
 
     #[test]
+    fn mod2_can_write_functions_inside_of_the_module() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0CodeWriter;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: u32,
+                    }
+
+                    pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[("CODE_WRITE", &["fn_module:heyo"])];
+
+                    pub fn config(input: &mut Input, l0writer: &mut L0CodeWriter) {
+                        l0writer.write_internal_fn("pub fn heyo()".to_string(), "".to_string());
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let (_, stream) = e2e_module2_run_with_token_stream(&code, |_| {}).expect("Failed to compile");
+        let stream_str = stream.to_string();
+        // we add an extra bracket to check if this is truly inside the module.
+        // ie: if its the last function in the module then we expect to see something like:
+        // pub mod ... {
+        // ...
+        // pub fn heyo() { }
+        // }
+        // ^ we are looking for this
+        assert_contains_str(stream_str, "pub fn heyo () { } }");
+    }
+
+    #[test]
     fn mod2_can_provide_requested_fn_signatures() {
         let code = [
             stringify!(
