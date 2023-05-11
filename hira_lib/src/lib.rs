@@ -600,6 +600,36 @@ pub mod e2e_tests {
     }
 
     #[test]
+    fn mod2_can_write_functions_outside_of_the_module() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0CodeWriter;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: u32,
+                    }
+
+                    pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[("CODE_WRITE", &["fn_global:main"])];
+
+                    pub fn config(input: &mut Input, l0writer: &mut L0CodeWriter) {
+                        l0writer.write_global_fn("pub fn main()".to_string(), "".to_string());
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let (_, stream) = e2e_module2_run_with_token_stream(&code, |_| {}).expect("Failed to compile");
+        let stream_str = stream.to_string();
+        assert_contains_str(stream_str, "pub fn main ()");
+    }
+
+    #[test]
     fn mod2_can_provide_requested_fn_signatures() {
         let code = [
             stringify!(

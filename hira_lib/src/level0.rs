@@ -1,7 +1,7 @@
-use std::{collections::HashSet, str::FromStr};
+use std::{collections::{HashSet, HashMap}, str::FromStr};
 
 use proc_macro2::TokenStream;
-use syn::{ItemMod, ItemFn};
+use syn::{ItemMod, ItemFn, Signature};
 use quote::quote;
 use wasm_type_gen::*;
 
@@ -44,6 +44,8 @@ pub struct LibraryObj {
     pub l0_append_file: L0AppendFile,
 
     pub l0_code_reader: L0CodeReader,
+
+    pub l0_code_writer: L0CodeWriter,
 }
 
 
@@ -51,12 +53,14 @@ impl LibraryObj {
     pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
         self.l0_core.apply_changes(conf, module, stream)?;
         self.l0_append_file.apply_changes(conf, module, stream)?;
+        self.l0_code_writer.apply_changes(conf, module, stream)?;
         Ok(())
     }
     pub fn initialize_capabilities(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
         // core doesnt need any initialization (for now)
         self.l0_append_file.initialize_capabilities(conf, module)?;
         self.l0_code_reader.initialize_capabilities(conf, module)?;
+        self.l0_code_writer.initialize_capabilities(conf, module)?;
         Ok(())
     }
 }
@@ -97,6 +101,13 @@ pub struct L0CodeReader {
     function_signatures: std::collections::HashMap<String, FunctionSignature>,
 }
 
+#[derive(WasmTypeGen, Debug, Default)]
+pub struct L0CodeWriter {
+    current_module_name: String,
+    in_module_functions: std::collections::HashMap<String, std::collections::HashMap::<String, String>>,
+    global_functions: std::collections::HashMap<String, std::collections::HashMap::<String, String>>,
+}
+
 #[derive(Default, Debug)]
 struct FillCodeReader {
     function_signatures: std::collections::HashMap<String, FunctionSignature>,
@@ -107,38 +118,106 @@ fn set_functions(filler: &mut FillCodeReader, item: &mut ItemFn) {
     let name = item.sig.ident.to_string();
     if !filler.requested_fns.contains(&name) { return }
 
-    let sig = parse_fn_signature(item);
+    let sig = parse_fn_signature(&item);
     filler.function_signatures.insert(name, sig);
+}
+
+fn get_all_capability_params(conf: &HiraConfig, module: &HiraModule2, capability_names: &[&str]) -> std::collections::HashMap<String, Vec<(String, String)>> {
+    // find all transient modules that might have requested this capability
+    let mut all_transient_deps = HashSet::new();
+    module.visit_lvl3_dependency_names(&conf, &mut |dep| {
+        all_transient_deps.insert(dep.to_string());
+    });
+    // find all the requested capabilities across all modules:
+    let mut out = std::collections::HashMap::new();
+    // ensure each capability name gets inserted as an empty vec
+    for name in capability_names {
+        out.insert(name.to_string(), vec![]);
+    }
+    for dep in all_transient_deps.iter() {
+        if let Some(module) = conf.get_mod2(dep) {
+            for (name, val) in out.iter_mut() {
+                if let Some(params) = module.get_capability_params(name) {
+                    for p in params {
+                        val.push((dep.to_string(), p.to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+    out
+}
+
+impl L0CodeWriter {
+    pub fn initialize_capabilities(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
+        Ok(())
+    }
+    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
+        // skip expensive calculations if theres nothing to output
+        if self.global_functions.is_empty() && self.in_module_functions.is_empty() {
+            return Ok(());
+        }
+
+        // find its capabilities
+        let params = get_all_capability_params(conf, &module, &["CODE_WRITE"]);
+        // build a hash map of which modules were allowed
+        // to write which functions:
+        let mut allowed_global_fn_map = std::collections::HashMap::<&String, Vec<&String>>::new();
+        for (requestor, param) in &params["CODE_WRITE"] {
+            if let Some(existing) = allowed_global_fn_map.get_mut(requestor) {
+                existing.push(param);
+            } else {
+                allowed_global_fn_map.insert(requestor, vec![param]);
+            }
+        }
+
+        for (requestor, map) in self.global_functions.iter() {
+            if let Some(requestor_allowed) = allowed_global_fn_map.get(requestor) {
+                for (signature, body) in map {
+                    // first, parse the fn_signature
+                    let full_fn = format!("{} {{ {} }}", signature, body);
+                    let tokens = TokenStream::from_str(&full_fn)
+                        .map_err(|e| compiler_error(&format!("Module {} provided invalid function signature\n{:?}", requestor, e)))?;
+                    let item_fn = syn::parse2::<ItemFn>(tokens.clone())
+                        .map_err(|e| compiler_error(&format!("Module {} provided invalid function signature\n{:?}", requestor, e)))?;
+                    let sig = parse_fn_signature(&item_fn);
+                    let fn_name = &sig.name;
+                    // check if this requestor is allowed to write this function:
+                    let desired_capability = format!("fn_global:{}", fn_name);
+                    if !requestor_allowed.contains(&&desired_capability) {
+                        return Err(compiler_error(&format!("Module {} attempted to write global function {} but no {} capability was defined", requestor, fn_name, desired_capability)));
+                    }
+                    // add it after the module def:
+                    stream.extend([tokens]);
+                }
+            } else {
+                return Err(compiler_error(&format!("Module {} attempted to write a function, but no CODE_WRITE capability found", requestor)));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl L0CodeReader {
     pub fn initialize_capabilities(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
-        // find all transient modules that might have requested code read abilities
-        let mut all_transient_deps = HashSet::new();
-        module.visit_lvl3_dependency_names(&conf, &mut |dep| {
-            all_transient_deps.insert(dep.to_string());
-        });
+        let mut params = get_all_capability_params(conf, &module, &["CODE_READ"]);
         // find all the requested function signatures across all modules:
         let mut function_signature_set = HashSet::new();
-        for dep in all_transient_deps.iter() {
-            if let Some(module) = conf.get_mod2(dep) {
-                if let Some(params) = module.get_capability_params("CODE_READ") {
-                    for p in params {
-                        if let Some((key, val)) = p.split_once(":") {
-                            match key {
-                                "fn" => {
-                                    function_signature_set.insert(val.to_string());
-                                },
-                                x => {
-                                    return Err(compiler_error(&format!("Module {} requested READ_CODE capability of an unknown type '{}'", dep, x)));
-                                }
-                            }
-                        } else {
-                            return Err(compiler_error(&format!("Module {} requested READ_CODE capability with an unknown syntax '{}'\nExpected to find something like 'fn:function_name'", dep, p)));
-                        }
+        let code_read_params = params.remove("CODE_READ").unwrap();
+        for (dep, p) in code_read_params.iter() {
+            if let Some((key, val)) = p.split_once(":") {
+                match key {
+                    "fn" => {
+                        function_signature_set.insert(val.to_string());
+                    },
+                    x => {
+                        return Err(compiler_error(&format!("Module {} requested READ_CODE capability of an unknown type '{}'", dep, x)));
                     }
                 }
-            }
+            } else {
+                return Err(compiler_error(&format!("Module {} requested READ_CODE capability with an unknown syntax '{}'\nExpected to find something like 'fn:function_name'", dep, p)));
+            } 
         }
         // get all function signatures of this lvl3 module that match all_fn_names
         let tokens = TokenStream::from_str(&module.contents)
@@ -438,6 +517,29 @@ impl L0CodeReader {
     }
 }
 
+#[output_and_stringify_basic_const(CODE_WRITER_IMPL)]
+impl L0CodeWriter {
+    pub fn new() -> Self {
+        Self { current_module_name: Default::default(), in_module_functions: Default::default(), global_functions: Default::default() }
+    }
+    pub fn write_inside_module_fn(&mut self, sig: String, body: String) {
+        // self.in_module_functions.insert(sig, body);
+        if !self.in_module_functions.contains_key(&self.current_module_name) {
+            self.in_module_functions.insert(self.current_module_name.to_string(), Default::default());
+        }
+        if let Some(map) = self.in_module_functions.get_mut(&self.current_module_name) {
+            map.insert(sig, body);
+        }
+    }
+    pub fn write_global_fn(&mut self, sig: String, body: String) {
+        if !self.global_functions.contains_key(&self.current_module_name) {
+            self.global_functions.insert(self.current_module_name.to_string(), Default::default());
+        }
+        if let Some(map) = self.global_functions.get_mut(&self.current_module_name) {
+            map.insert(sig, body);
+        }
+    }
+}
 
 #[output_and_stringify_basic_const(LIBRARY_OBJ_IMPL)]
 impl LibraryObj {
@@ -450,6 +552,7 @@ impl LibraryObj {
         self.l0_append_file.current_module_name = name.to_string();
         self.l0_core.current_module_name = name.to_string();
         self.l0_kv_reader.current_module_name = name.to_string();
+        self.l0_code_writer.current_module_name = name.to_string();
     }
 
     // if adding a new l0 functionality,
@@ -462,6 +565,7 @@ impl LibraryObj {
             l0_core: L0Core::new(),
             l0_append_file: L0AppendFile::new(),
             l0_code_reader: L0CodeReader::new(),
+            l0_code_writer: L0CodeWriter::new(),
         }
     }
 }
@@ -469,5 +573,6 @@ impl LibraryObj {
 pub fn get_include_string() -> &'static [&'static str] {
     &[
         LIBRARY_OBJ_IMPL, FILE_IMPL, CORE_IMPL, KV_IMPL, CODE_READER_IMPL,
+        CODE_WRITER_IMPL,
     ]
 }
