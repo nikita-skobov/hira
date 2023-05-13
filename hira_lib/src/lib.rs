@@ -377,7 +377,12 @@ pub mod e2e_tests {
     ) -> Result<(HiraConfig, TokenStream), TokenStream> {
         let mut conf = HiraConfig::default();
         conf.set_base_code();
-        conf.wasm_directory = "./test_out".to_string();
+        let path = std::path::PathBuf::from("./test_out");
+        let _ = std::fs::create_dir("test_out");
+        let path = path.canonicalize().expect("Failed to canonicalize test_out directory");
+        let full_path_str = path.to_string_lossy().to_string();
+        conf.wasm_directory = full_path_str;
+
         conf_cb(&mut conf);
         let mut stream = TokenStream::new();
         for code in module_code {
@@ -760,6 +765,41 @@ pub mod e2e_tests {
         let err_str = err.to_string();
         assert_contains_str(err_str, "had a dependency that attempted to write file you_got_hacked.txt, but allowed files are only");
     }
+
+    #[test]
+    fn mod2_can_depend_on_external_crates() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    extern crate serde_json;
+                    use super::L0AppendFile;
+
+                    pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[("FILES", &["hello.txt"])];
+
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub unused: bool,
+                    }
+                    pub fn config(input: &mut Input, l0core: &mut L0AppendFile) {
+                        let val: serde_json::Value = serde_json::from_str("{\"hello\":\"world\"}").expect("Failed to deserialize");
+                        let json_str = serde_json::to_string(&val).expect("Failed to serialize");
+                        l0core.append_to_file("hello.txt", "b", json_str);
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let res = e2e_module2_run(&code,|_| {});
+        let mut conf = res.unwrap();
+        let data = conf.get_shared_file_data("hello.txt").expect("Failed to find hello.txt");
+        assert_contains_str(data, r#"{"hello":"world"}"#);
+    }
+
 
     #[test]
     fn mod2_outputs_not_set_if_explicit() {

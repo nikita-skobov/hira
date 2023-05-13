@@ -1116,6 +1116,21 @@ pub fn hira_mod2(mut stream: TokenStream, mut _attr: TokenStream) -> TokenStream
     }
 }
 
+pub fn get_all_extern_crates(conf: &mut HiraConfig, module: &mut HiraModule2) -> Vec<String> {
+    let mut all_externs = HashSet::new();
+    for ext in module.extern_crates.iter() {
+        all_externs.insert(ext);
+    }
+    module.visit_lvl3_dependency_names(conf, &mut |name| {
+        if let Some(dep_mod) = conf.get_mod2(name) {
+            for ext in dep_mod.extern_crates.iter() {
+                all_externs.insert(ext);
+            }
+        }
+    });
+    all_externs.drain().map(|x| x.to_string()).collect()
+}
+
 pub fn hira_mod2_inner(conf: &mut HiraConfig, mut stream: TokenStream) -> Result<TokenStream, TokenStream> {
     let mut module = parse_module_from_stream(stream.clone())?;
     module.verify_config_signature(conf)?;
@@ -1132,14 +1147,14 @@ pub fn hira_mod2_inner(conf: &mut HiraConfig, mut stream: TokenStream) -> Result
     }
 
     let codes = get_wasm_code_to_compile2(conf, &module)?;
-
+    let extern_dependencies = get_all_extern_crates(conf, &mut module);
     let mut pass_this = LibraryObj::new();
     pass_this.initialize_capabilities(conf, &mut module)?;
 
     let mut lib_obj = get_wasm_output(
         &conf.wasm_directory,
         &codes,
-        &[],
+        &extern_dependencies,
         &pass_this
     ).unwrap_or_default();
 
