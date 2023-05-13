@@ -1,11 +1,11 @@
-use std::{collections::{HashSet, HashMap}, str::FromStr};
+use std::{collections::{HashSet}, str::FromStr};
 
 use proc_macro2::TokenStream;
-use syn::{ItemMod, ItemFn, Signature, Item};
-use quote::{quote, ToTokens};
+use syn::{ItemMod, ItemFn, Item};
+use quote::{ToTokens};
 use wasm_type_gen::*;
 
-use crate::{HiraConfig, module_loading::{HiraModule2, OutputType}, parsing::{compiler_error, iterate_mod_def, iterate_mod_def_generic, parse_fn_signature}, wasm_types::{to_map_entry, FunctionSignature}};
+use crate::{HiraConfig, module_loading::{HiraModule2, OutputType}, parsing::{compiler_error, iterate_mod_def_generic, parse_fn_signature}, wasm_types::{to_map_entry, FunctionSignature}};
 
 
 #[derive(WasmTypeGen, Debug, Default)]
@@ -149,7 +149,7 @@ fn get_all_capability_params(conf: &HiraConfig, module: &HiraModule2, capability
 }
 
 impl L0CodeWriter {
-    pub fn initialize_capabilities(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
+    pub fn initialize_capabilities(&mut self, _conf: &mut HiraConfig, _module: &mut HiraModule2) -> Result<(), TokenStream> {
         Ok(())
     }
     pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
@@ -277,7 +277,7 @@ impl L0AppendFile {
         // put data in this struct, and then we verify that its valid when we leave the wasm context.
         Ok(())
     }
-    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
+    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, _stream: &mut TokenStream) -> Result<(), TokenStream> {
         let mut all_transient_deps = HashSet::new();
         module.visit_lvl3_dependency_names(&conf, &mut |dep| {
             all_transient_deps.insert(dep.to_string());
@@ -373,7 +373,7 @@ impl L0Core {
                     return Err(compiler_error(&format!("Detected outputs from intermediate module {} but this module doesn't exist", mod_name)));
                 }
             };
-            for (key, val) in kv_pairs.iter_mut() {
+            for (key, _) in kv_pairs.iter_mut() {
                 if !module.has_output(key, conf) {
                     return Err(compiler_error(&format!("Detected output '{}' from intermediate module {} but this module did not specify such an output", key, mod_name)));
                 }
