@@ -126,6 +126,13 @@ pub struct HiraModule2 {
     /// module that this module referenced in its config function
     pub lvl3_module_depends_on: Option<String>,
 
+    /// I was tempted to overload the term 'dependency' even more...
+    /// These extern crates represent anytime the user added `extern crate X` to
+    /// their module. These values are then used to pass the names of dependency
+    /// crates that should be compiled prior to compiling the user's wasm. This enables
+    /// using arbitrary 3rd party dependencies within wasm!
+    pub extern_crates: Vec<String>,
+
     /// List of names of fields that this module outputs to be
     /// used by other modules.
     /// must be individual items inside
@@ -1252,6 +1259,11 @@ pub fn set_dependencies(module: &mut HiraModule2, item: &mut syn::ItemUse) {
     module.dependencies = deps;
 }
 
+pub fn set_extern_crates(module: &mut HiraModule2, item: &mut syn::ItemExternCrate) {
+    let name = get_ident_string(&item.ident);
+    module.extern_crates.push(name);
+}
+
 pub fn set_outputs(module: &mut HiraModule2, item: &mut syn::ItemMod) {
     let name = get_ident_string(&item.ident);
     if name != "outputs" { return; }
@@ -1308,6 +1320,7 @@ pub fn parse_module_from_stream(stream: TokenStream) -> Result<HiraModule2, Toke
         &[set_dependencies],
         &[set_outputs],
         &[set_capability_params],
+        &[set_extern_crates],
     );
     Ok(hira_mod)
 }
@@ -1372,6 +1385,26 @@ mod tests {
         assert_eq!(module.dependencies["somedep2"], Ok(vec!["A1".to_string(), "A2".to_string()]));
         assert!(module.input_struct.contains("pub a"));
         assert!(module.input_struct.contains("pub struct Input"));
+    }
+
+    #[test]
+    fn mod2_can_detect_extern_crates() {
+        let code = r#"
+        mod hello_world {
+            extern crate some_dependency;
+
+            mod outputs {
+                pub const HEY: &'static str = "dsa";
+            }
+            pub struct Input { pub a: u32 }
+            pub fn config(input: &mut Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        assert_eq!(module.name, "hello_world");
+        assert_eq!(module.extern_crates.len(), 1);
+        assert_eq!(module.extern_crates[0], "some_dependency");
     }
 
     #[test]

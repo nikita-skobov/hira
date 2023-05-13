@@ -23,7 +23,7 @@ use syn::{
     ItemStruct,
     ItemTrait,
     ItemUnion,
-    Expr, ItemUse, Visibility, token::Pub, ItemMacro, ItemImpl
+    Expr, ItemUse, Visibility, token::Pub, ItemMacro, ItemImpl, ItemExternCrate
 };
 
 use crate::{module_loading::{HiraModule, HiraModule2, ModuleLevel}, wasm_types::{InputType, GlobalVariable, FunctionSignature, UserInput}, HiraConfig};
@@ -198,6 +198,7 @@ pub fn iterate_mod_def_generic<T>(
     use_callbacks: &[fn(&mut T, &mut ItemUse)],
     mod_callbacks: &[fn(&mut T, &mut ItemMod)],
     const_callbacks: &[fn(&mut T, &mut ItemConst)],
+    extern_crate_callbacks: &[fn(&mut T, &mut ItemExternCrate)],
 ) {
     let mut default_vec = vec![];
     let content = mod_def.content.as_mut().map(|x| &mut x.1).unwrap_or(&mut default_vec);
@@ -228,6 +229,11 @@ pub fn iterate_mod_def_generic<T>(
                     cb(thing, x);
                 }
             }
+            Item::ExternCrate(x) => {
+                for cb in extern_crate_callbacks {
+                    cb(thing, x);
+                }
+            }
             _ => {},
         }
     }
@@ -241,6 +247,7 @@ pub fn iterate_mod_def(
     use_callbacks: &[fn(&mut HiraModule2, &mut ItemUse)],
     mod_callbacks: &[fn(&mut HiraModule2, &mut ItemMod)],
     const_callbacks: &[fn(&mut HiraModule2, &mut ItemConst)],
+    extern_crate_callbacks: &[fn(&mut HiraModule2, &mut ItemExternCrate)],
 ) {
     module.name = get_ident_string(&mod_def.ident);
     module.is_pub = match mod_def.vis {
@@ -248,7 +255,7 @@ pub fn iterate_mod_def(
         _ => false,
     };
 
-    iterate_mod_def_generic(module, mod_def, fn_callbacks, struct_callbacks, use_callbacks, mod_callbacks, const_callbacks);
+    iterate_mod_def_generic(module, mod_def, fn_callbacks, struct_callbacks, use_callbacks, mod_callbacks, const_callbacks, extern_crate_callbacks);
 
     module.contents = mod_def.to_token_stream().to_string();
 }
