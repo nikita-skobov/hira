@@ -1,2 +1,0 @@
-BUILD_BUCKET=some-bucket-name
-SECRET_STACK_NAME=the-name-of-your-stack

@@ -1,0 +1,167 @@
+use std::{str::FromStr};
+
+use proc_macro2::{TokenStream};
+use wasm_type_gen::*;
+use quote::{quote, format_ident};
+
+use crate::{
+    parsing::{
+        DependencyConfig, fill_dependency_config,
+    },
+    HiraConfig,
+    module_loading::{HiraModule2},
+    level0::*,
+};
+
+#[derive(WasmTypeGen, Debug, Default)]
+pub struct FunctionSignature {
+    pub name: String,
+    pub is_pub: bool,
+    pub is_async: bool,
+    pub is_unsafe: bool,
+    pub is_const: bool,
+    pub inputs: Vec<UserInput>,
+    pub return_ty: String,
+}
+
+#[derive(Debug)]
+pub struct MapEntry<T> {
+    pub key: String,
+    pub lines: Vec<T>,
+}
+
+#[derive(WasmTypeGen, Debug)]
+pub struct UserInput {
+    /// only relevant for input params to a function. not applicable to struct fields.
+    pub is_self: bool,
+    pub name: String,
+    pub ty: String,
+}
+
+#[derive(WasmTypeGen, Debug)]
+pub struct FileOut {
+    pub name: String,
+    pub data: Vec<u8>,
+}
+
+pub fn to_map_entry(data: Vec<SharedOutputEntry>) -> Vec<MapEntry<MapEntry<(bool, String, Option<String>)>>> {
+    let mut map_entries: Vec<MapEntry<MapEntry<(bool, String, Option<String>)>>> = vec![];
+    for d in data {
+        if let Some(m) = map_entries.iter_mut().find(|x| x.key == d.filename) {
+            if let Some(m) = m.lines.iter_mut().find(|x| x.key == d.label) {
+                m.lines.push((d.unique, d.line, d.after));
+            } else {
+                m.lines.push(MapEntry { key: d.label, lines: vec![(d.unique, d.line, d.after)] });
+            }
+        } else {
+            map_entries.push(MapEntry { key: d.filename, lines: vec![MapEntry {
+                key: d.label,
+                lines: vec![(d.unique, d.line, d.after)],
+            }] })
+        }
+    }
+    map_entries
+}
+
+/// TODO: should this fn be allowed to panic???
+pub fn get_wasm_output(
+    wasm_out_dir: &str,
+    code: &[(String, String)],
+    extern_crates: &[String],
+    data_to_pass: &LibraryObj,
+) -> Option<LibraryObj> {
+    let _ = std::fs::create_dir_all(wasm_out_dir);
+    let out_file = wasm_type_gen::compile_strings_to_wasm_with_extern_crates(code, extern_crates, wasm_out_dir).expect("compilation error");
+    let wasm_file = std::fs::read(out_file).expect("failed to read wasm binary");
+    let out = run_wasm(&wasm_file, data_to_pass.to_binary_slice()).expect("runtime error running wasm");
+    LibraryObj::from_binary_slice(out)
+}
+
+
+pub fn get_wasm_code_to_compile2(
+    hira_conf: &HiraConfig,
+    hira_module_lvl3: &HiraModule2
+) -> Result<[(String, String); 3], TokenStream> {
+    let dependency_name = format!("dependencies_{}", hira_module_lvl3.name);
+    let mut dependency_mod_defs = vec![];
+
+    let l2_dep_name = hira_module_lvl3.level3_get_depends_on(hira_module_lvl3.lvl3_module_depends_on.as_ref())?;
+    let dependency_config = fill_dependency_config(hira_conf, &l2_dep_name, &mut dependency_mod_defs)?;
+
+    let hira_base_code = hira_conf.hira_base_code.clone();
+    let module_code = quote! {
+        extern crate hira_base;
+        use hira_base::*;
+
+        #(#dependency_mod_defs)*
+    };
+    let users_code = get_wasm_code_to_compile_lvl3(
+        hira_module_lvl3.name.clone(), hira_module_lvl3.contents.clone(),
+        dependency_config, &dependency_name,
+    );
+
+    let module_code = module_code.to_string();
+    let users_code = users_code.to_string();
+
+    Ok([
+        ("hira_base".to_string(), hira_base_code),
+        (dependency_name, module_code),
+        (hira_module_lvl3.name.to_string(), users_code),
+    ])
+}
+
+pub fn get_wasm_code_to_compile_lvl3(
+    lvl3module_name: String,
+    lvl3module_def: String,
+    lvl2module: DependencyConfig,
+    dependency_crate_name: &String,
+) -> TokenStream {
+    let mod3name = format_ident!("{}", lvl3module_name);
+    let mod2name = format_ident!("{}", lvl2module.name);
+    let conf0 = format_ident!("conf_0");
+    let dep_crate_name = format_ident!("{}", dependency_crate_name);
+
+    let mod2_calling_code = lvl2module.config_calling_code(conf0.clone());
+    let lvl3mod_tokens = TokenStream::from_str(&lvl3module_def).expect("Failed to parse lvl3 module def as tokens");
+
+    quote! {
+        extern crate hira_base;
+        extern crate #dep_crate_name;
+        use hira_base::LibraryObj;
+        use #dep_crate_name::*;
+
+        #lvl3mod_tokens
+
+        #[no_mangle]
+        pub fn wasm_main(library_obj: &mut LibraryObj) {
+            let mut #conf0 = #mod2name::Input::default();
+            #mod3name::config(&mut #conf0);
+
+            #mod2_calling_code
+        }
+
+        extern "C" {
+            fn get_entrypoint_alloc_size() -> u32;
+            fn get_entrypoint_data(ptr : * const u8, len : u32);
+            fn set_entrypoint_data(ptr : * const u8, len : u32);
+        }
+
+        #[no_mangle]
+        pub extern fn wasm_entrypoint() -> u32 {
+            let mut input_obj = unsafe {
+                let len = get_entrypoint_alloc_size() as usize ; let mut data : Vec <
+                u8 > = Vec :: with_capacity(len) ; data.set_len(len) ; let ptr =
+                data.as_ptr() ; let len = data.len() ;
+                get_entrypoint_data(ptr, len as _) ; match LibraryObj ::
+                from_binary_slice(data) { Some(s) => s, None => return 1, }
+            };
+            unsafe {
+                let _ = wasm_main(& mut input_obj) ;
+                let out_data = input_obj.to_binary_slice() ; let ptr =
+                out_data.as_ptr() ; let len = out_data.len() ;
+                set_entrypoint_data(ptr, len as _) ;
+            }
+            0
+        }
+    }
+}

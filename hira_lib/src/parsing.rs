@@ -1,0 +1,442 @@
+//! module w/ helper functions related to parsing from
+//! token streams into hira specific structures
+//! 
+
+use std::str::FromStr;
+
+use serde::{Serialize, Deserialize};
+
+use proc_macro2::{
+    TokenStream,
+    TokenTree, Ident,
+};
+use quote::{quote, ToTokens, format_ident};
+use syn::{
+    Item,
+    ItemFn,
+    ItemConst,
+    ItemMod,
+    ItemStruct,
+    Expr, ItemUse, Visibility, token::Pub, ItemExternCrate
+};
+
+use crate::{module_loading::{HiraModule2, ModuleLevel}, wasm_types::{FunctionSignature, UserInput}, HiraConfig};
+
+pub fn default_stream() -> TokenStream {
+    compiler_error("Failed to get hira config")
+}
+
+pub fn compiler_error(msg: &str) -> TokenStream {
+    let tokens = format!("compile_error!(r#\"{msg}\"#);");
+    let out = match TokenStream::from_str(&tokens) {
+        Ok(o) => o,
+        Err(e) => {
+            panic!("Failed to parse compiler_error formatting\n{:?}", e);
+        }
+    };
+    out
+}
+
+pub fn iterate_tuples(expr: &Expr, cb: &mut impl FnMut(String, &Expr)) {
+    match expr {
+        Expr::Array(array) => {
+            for elem in array.elems.iter() {
+                iterate_tuples(elem, cb);
+            }
+        }
+        Expr::Reference(r) => {
+            iterate_tuples(&*r.expr, cb);
+        }
+        Expr::Tuple(tuple) if tuple.elems.len() == 2 => {
+            if let syn::Expr::Lit(l) = &tuple.elems[0] {
+                let mut s1 = l.to_token_stream().to_string();
+                remove_surrounding_quotes(&mut s1);
+                cb(s1, &tuple.elems[1]);
+            }
+        }
+        _ => (),
+    }
+}
+
+pub fn parse_fn_signature(item: &ItemFn) -> FunctionSignature {
+    let mut name = item.sig.ident.to_string();
+    remove_surrounding_quotes(&mut name);
+    let mut inputs = vec![];
+    for input in item.sig.inputs.iter() {
+        let usr_field = UserInput {
+            is_self: match input {
+                syn::FnArg::Receiver(_) => true,
+                syn::FnArg::Typed(_) => false,
+            },
+            name: match input {
+                syn::FnArg::Receiver(_) => "&self".into(),
+                syn::FnArg::Typed(ty) => ty.pat.to_token_stream().to_string(),
+            },
+            ty: match input {
+                syn::FnArg::Receiver(_) => "".into(),
+                syn::FnArg::Typed(ty) => ty.ty.to_token_stream().to_string(),
+            }
+        };
+        inputs.push(usr_field);
+    }
+    let return_ty = match &item.sig.output {
+        syn::ReturnType::Default => "".into(),
+        syn::ReturnType::Type(_, b) => b.to_token_stream().to_string(),
+    };
+
+    FunctionSignature {
+        name,
+        is_pub: match item.vis {
+            Visibility::Public(_) => true,
+            _ => false,
+        },
+        is_async: item.sig.asyncness.is_some(),
+        is_unsafe: item.sig.unsafety.is_some(),
+        is_const: item.sig.constness.is_some(),
+        inputs,
+        return_ty,
+    }
+}
+
+/// in a few places in hira we let the module writer specify some array of values
+/// which we parse out the strings. This function is generic over that iteration
+/// and calls the callback with anytime we find a string
+pub fn iterate_expr_for_strings(
+    expr: &Expr,
+    mut cb: impl FnMut(String)
+) {
+    let arr = match expr {
+        syn::Expr::Array(arr) => arr,
+        syn::Expr::Reference(r) => {
+            if let syn::Expr::Array(arr) = &*r.expr {
+                arr
+            } else {
+                return;
+            }
+        }
+        _ => {
+            return;
+        }
+    };
+    for item in arr.elems.iter() {
+        if let syn::Expr::Lit(l) = item {
+            if let syn::Lit::Str(s) = &l.lit {
+                let mut s = s.token().to_string();
+                remove_surrounding_quotes(&mut s);
+                cb(s);
+            }
+        }
+    }
+}
+
+/// given a list of paths of names into an item tree
+/// such as "use A::B::C::outputs::something"
+/// return a tuple of the module name (this is always 1 before the outputs)
+/// and optionally if there is a field after outputs, the specific import
+pub fn parse_module_name_from_use_tree(names: &[String]) -> Option<(&String, Option<&String>)> {
+    let output_index = names.iter().position(|x| x == "outputs")?;
+    let mod_name_index = if output_index > 0 { output_index - 1 } else { return None };
+    let mod_name = &names[mod_name_index];
+    if output_index == names.len() - 1 {
+        return Some((mod_name, None));
+    }
+    // otherwise, there's something after the outputs
+    let last = names.last()?;
+    Some((mod_name, Some(last)))
+}
+
+/// callback takes 3 args:
+/// - list of all paths into the use tree in order left to right.
+/// - option of if this is a renamed item
+/// - boolean if the last component is a wildcard.
+pub fn iterate_item_tree(past_names: &mut Vec<String>, tree: &syn::UseTree, cb: &mut impl FnMut(&[String], Option<String>, bool)) {
+    match tree {
+        syn::UseTree::Name(n) => {
+            let name = get_ident_string(&n.ident);
+            past_names.push(name);
+            cb(&past_names, None, false);
+            past_names.pop();
+        }
+        syn::UseTree::Rename(n) => {
+            let name = get_ident_string(&n.ident);
+            let rename = get_ident_string(&n.rename);
+            past_names.push(name);
+            cb(&past_names, Some(rename), false);
+            past_names.pop();
+        }
+        syn::UseTree::Path(p) => {
+            let name = get_ident_string(&p.ident);
+            let len = past_names.len();
+            past_names.push(name);
+            iterate_item_tree(past_names, &p.tree, cb);
+            past_names.truncate(len);
+        }
+        syn::UseTree::Group(g) => {
+            for item in &g.items {
+                let len = past_names.len();
+                iterate_item_tree(past_names, item, cb);
+                past_names.truncate(len);
+            }
+        }
+        syn::UseTree::Glob(_) => {
+            cb(&past_names, None, true);
+        }
+    }
+}
+
+pub fn iterate_mod_def_generic<T>(
+    thing: &mut T,
+    mod_def: &mut ItemMod,
+    fn_callbacks: &[fn(&mut T, &mut ItemFn)],
+    struct_callbacks: &[fn(&mut T, &mut ItemStruct)],
+    use_callbacks: &[fn(&mut T, &mut ItemUse)],
+    mod_callbacks: &[fn(&mut T, &mut ItemMod)],
+    const_callbacks: &[fn(&mut T, &mut ItemConst)],
+    extern_crate_callbacks: &[fn(&mut T, &mut ItemExternCrate)],
+) {
+    let mut default_vec = vec![];
+    let content = mod_def.content.as_mut().map(|x| &mut x.1).unwrap_or(&mut default_vec);
+    for item in content {
+        match item {
+            Item::Fn(x) => {
+                for cb in fn_callbacks {
+                    cb(thing, x);
+                }
+            }
+            Item::Mod(x) => {
+                for cb in mod_callbacks {
+                    cb(thing, x);
+                }
+            }
+            Item::Struct(x) => {
+                for cb in struct_callbacks {
+                    cb(thing, x);
+                }
+            }
+            Item::Use(x) => {
+                for cb in use_callbacks {
+                    cb(thing, x);
+                }
+            }
+            Item::Const(x) => {
+                for cb in const_callbacks {
+                    cb(thing, x);
+                }
+            }
+            Item::ExternCrate(x) => {
+                for cb in extern_crate_callbacks {
+                    cb(thing, x);
+                }
+            }
+            _ => {},
+        }
+    }
+}
+
+pub fn iterate_mod_def(
+    module: &mut HiraModule2,
+    mod_def: &mut ItemMod,
+    fn_callbacks: &[fn(&mut HiraModule2, &mut ItemFn)],
+    struct_callbacks: &[fn(&mut HiraModule2, &mut ItemStruct)],
+    use_callbacks: &[fn(&mut HiraModule2, &mut ItemUse)],
+    mod_callbacks: &[fn(&mut HiraModule2, &mut ItemMod)],
+    const_callbacks: &[fn(&mut HiraModule2, &mut ItemConst)],
+    extern_crate_callbacks: &[fn(&mut HiraModule2, &mut ItemExternCrate)],
+) {
+    module.name = get_ident_string(&mod_def.ident);
+    module.is_pub = match mod_def.vis {
+        Visibility::Public(_) => true,
+        _ => false,
+    };
+
+    iterate_mod_def_generic(module, mod_def, fn_callbacks, struct_callbacks, use_callbacks, mod_callbacks, const_callbacks, extern_crate_callbacks);
+
+    module.contents = mod_def.to_token_stream().to_string();
+}
+
+pub fn get_ident_string(id: &Ident) -> String {
+    let mut s = id.to_string();
+    remove_surrounding_quotes(&mut s);
+    s
+}
+
+pub fn remove_surrounding_quotes(s: &mut String) {
+    while s.starts_with('"') && s.ends_with('"') && s.len() > 1 {
+        s.remove(0);
+        s.pop();
+    }
+}
+
+/// given an arbitrary token stream, iterate and find all string literals
+/// and output a vector of the found strings. This method consumes the stream,
+/// and ignores everything that is not a string literal. it does not recurse into Groups.
+pub fn get_list_of_strings(stream: TokenStream) -> Vec<String> {
+    let mut out = vec![];
+    for item in stream {
+        if let TokenTree::Literal(l) = item {
+            let mut s = l.to_string();
+            remove_surrounding_quotes(&mut s);
+            out.push(s);
+        }
+    }
+    out
+}
+
+pub fn is_public(vis: &Visibility) -> bool {
+    match vis {
+        Visibility::Public(_) => true,
+        _ => false,
+    }
+}
+
+pub fn set_visibility(vis: &mut Visibility, is_pub: bool) {
+    let p = Pub::default();
+    match (&vis, is_pub) {
+        (Visibility::Public(_), false) => {
+            *vis = Visibility::Inherited;
+        }
+        (Visibility::Restricted(_), true) => {
+            *vis = Visibility::Public(p);
+        }
+        (Visibility::Inherited, true) => {
+            *vis = Visibility::Public(p);
+        }
+        _ => {}
+    }
+}
+
+pub fn convert_to_snake_case(field: &str) -> String {
+    let mut out = "".to_string();
+    for c in field.chars() {
+        if c.is_ascii_alphabetic() && c.is_ascii_uppercase() {
+            if !out.is_empty() {
+                out.push('_');
+            }
+            out.push(c.to_ascii_lowercase());
+        } else {
+            out.push(c.to_ascii_lowercase());
+        }
+    }
+    out
+}
+
+pub fn parse_as_module_item(stream: TokenStream) -> Result<ItemMod, TokenStream> {
+    let mod_def = syn::parse2::<ItemMod>(stream)
+        .map_err(|e| compiler_error(&format!("Failed to parse as ItemMod. Hira expects modules to be only applied to rust modules\n{:?}", e)))?;
+    Ok(mod_def)
+}
+
+#[derive(PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+pub enum DependencyTypeName {
+    Mod1Or2(String),
+    Library(String),
+}
+
+#[derive(Debug)]
+pub enum DependencyType {
+    Mod1or2(DependencyConfig),
+    Library(String),
+}
+
+#[derive(Debug)]
+pub struct DependencyConfig {
+    pub name: String,
+    pub level: ModuleLevel,
+    pub deps: Vec<DependencyType>,
+}
+
+impl DependencyConfig {
+    pub fn config_calling_code(&self, first_config_ident: Ident) -> TokenStream {
+        let item_name = &self.name;
+        let item_name_ident = format_ident!("{}", item_name);
+        let mut config_lets = vec![];
+        let mut config_pass = vec![];
+        let mut recursive = vec![];
+        for (i, item) in self.deps.iter().enumerate() {
+            let conf_name = format_ident!("conf_{}_{}", item_name, i);
+            match item {
+                DependencyType::Mod1or2(x) => {
+                    let x_name = format_ident!("{}", x.name);
+                    config_lets.push(quote!{ let mut #conf_name = #x_name::Input::default(); });
+                    config_pass.push(quote!{ &mut #conf_name, });
+                    recursive.push(x.config_calling_code(conf_name));
+                }
+                DependencyType::Library(x) => {
+                    let x_field_name = convert_to_snake_case(x);
+                    let x_name = format_ident!("{}", x_field_name);
+                    config_lets.push(quote!{ library_obj.set_current_module(#item_name); });
+                    config_pass.push(quote!{ &mut library_obj.#x_name, });
+                }
+            };
+        }
+        quote! {
+            #(#config_lets)*
+            #item_name_ident::config(&mut #first_config_ident, #(#config_pass)*);
+
+            #(#recursive)*
+        }
+    }
+}
+
+pub fn fill_dependency_config(hira_conf: &HiraConfig, name: &str, dep_contents: &mut Vec<TokenStream>) -> Result<DependencyConfig, TokenStream> {
+    let dep_module = hira_conf.get_mod2(name)
+        .ok_or(compiler_error(&format!("Failed to find module {}, but this module has not been loaded yet", name)))?;
+    let mut out = DependencyConfig {
+        name: name.to_string(),
+        level: dep_module.level,
+        deps: vec![],
+    };
+    // TODO: add deduplication logic here. lvl2 modules
+    // can depend on other lvl2 modules so there could be a circular dependency.
+    // which is fine! but we just have to ensure we dont emit the code multiple times.
+    let contents_stream = TokenStream::from_str(&dep_module.contents)
+        .map_err(|e| compiler_error(&format!("Failed to parse module {} as token stream\n{:?}", name, e)))?;
+    dep_contents.push(contents_stream);
+
+    for dep in dep_module.compile_dependencies.iter() {
+        let dep_type = match dep {
+            DependencyTypeName::Mod1Or2(s) => {
+                let conf = fill_dependency_config(hira_conf, &s, dep_contents)?;
+                DependencyType::Mod1or2(conf)
+            }
+            DependencyTypeName::Library(s) => {
+                DependencyType::Library(s.clone())
+            }
+        };
+        out.deps.push(dep_type);
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_snakecase_works() {
+        let field_ty = "L0KvReader";
+        assert_eq!(convert_to_snake_case(field_ty), "l0_kv_reader");
+    }
+
+    #[test]
+    fn iterating_item_tree_works() {
+        let tokens: TokenStream = "use hello::{world, something_else as xyz, third::*};".parse().unwrap();
+        let item_tree = syn::parse2::<ItemUse>(tokens).unwrap();
+        let mut outs = vec![];
+        let mut past_names = vec![];
+        iterate_item_tree(&mut past_names, &item_tree.tree, &mut |a, b, c| {
+            outs.push((a.to_vec(), b, c));
+        });
+        assert_eq!(outs[0].0, &["hello", "world"]);
+        assert_eq!(outs[0].1, None);
+        assert_eq!(outs[0].2, false);
+
+        assert_eq!(outs[1].0, &["hello", "something_else"]);
+        assert_eq!(outs[1].1, Some("xyz".to_string()));
+        assert_eq!(outs[1].2, false);
+
+        assert_eq!(outs[2].0, &["hello", "third"]);
+        assert_eq!(outs[2].1, None);
+        assert_eq!(outs[2].2, true);
+    }
+}

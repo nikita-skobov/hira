@@ -1,0 +1,11 @@
+[package]
+name = "hira"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+proc-macro2 = "1.0.52"
+hira_lib = { path = "../hira_lib" }
+
+[lib]
+proc-macro = true
