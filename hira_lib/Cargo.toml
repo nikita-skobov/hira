@@ -9,7 +9,7 @@ edition = "2021"
 proc-macro2 = "1.0.52"
 syn = { version = "2", features = ["extra-traits"] }
 quote = "1"
-wasm_type_gen = { git = "https://github.com/nikita-skobov/wasm_type_gen", rev = "0b4ccc2552ae818b23137cf79dd032b8cdfd2110" }
+wasm_type_gen = { git = "https://github.com/nikita-skobov/wasm_type_gen", rev = "eba8f3c197de315d803ef7da35bcab3421d58422" }
 adler32 = "*"
 toml = "0.7.3"
 serde = { version = "1.0.162", features = ["derive"] }

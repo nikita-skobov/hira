@@ -1033,6 +1033,7 @@ pub fn run_module_inner(conf: &mut HiraConfig, stream: TokenStream, mut attr: To
     let mut lib_obj = get_wasm_output(
         &conf.wasm_directory,
         &code,
+        &[],
         &pass_this
     ).unwrap_or_default();
 
@@ -1131,6 +1132,7 @@ pub fn hira_mod2_inner(conf: &mut HiraConfig, mut stream: TokenStream) -> Result
     let mut lib_obj = get_wasm_output(
         &conf.wasm_directory,
         &codes,
+        &[],
         &pass_this
     ).unwrap_or_default();
 

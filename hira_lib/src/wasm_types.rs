@@ -351,10 +351,11 @@ pub fn to_map_entry(data: Vec<SharedOutputEntry>) -> Vec<MapEntry<MapEntry<(bool
 pub fn get_wasm_output(
     wasm_out_dir: &str,
     code: &[(String, String)],
+    extern_crates: &[String],
     data_to_pass: &LibraryObj,
 ) -> Option<LibraryObj> {
     let _ = std::fs::create_dir_all(wasm_out_dir);
-    let out_file = wasm_type_gen::compile_strings_to_wasm(code, wasm_out_dir).expect("compilation error");
+    let out_file = wasm_type_gen::compile_strings_to_wasm_with_extern_crates(code, extern_crates, wasm_out_dir).expect("compilation error");
     let wasm_file = std::fs::read(out_file).expect("failed to read wasm binary");
     let out = run_wasm(&wasm_file, data_to_pass.to_binary_slice()).expect("runtime error running wasm");
     LibraryObj::from_binary_slice(out)
