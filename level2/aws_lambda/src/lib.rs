@@ -95,6 +95,7 @@ pub mod aws_lambda {
         pub fn set_names(&mut self, users_mod_name: &str) {
             if self.function_name == "UNDEFINED_FN_NAME" {
                 let mut func_name = users_mod_name.to_string();
+                func_name = func_name.replace("_", "");
                 // trim if longer than 64.
                 let max_func_len = 64 - Self::RESOURCE_NAME_PREFIX_LEN;
                 if func_name.len() > max_func_len {
