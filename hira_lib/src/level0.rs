@@ -57,7 +57,7 @@ impl LibraryObj {
         Ok(())
     }
     pub fn initialize_capabilities(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
-        // core doesnt need any initialization (for now)
+        self.l0_core.initialize_capabilities(conf, module)?;
         self.l0_append_file.initialize_capabilities(conf, module)?;
         self.l0_code_reader.initialize_capabilities(conf, module)?;
         self.l0_code_writer.initialize_capabilities(conf, module)?;
@@ -93,6 +93,7 @@ pub struct L0Core {
     compiler_warning_message: String,
     module_outputs: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
     current_module_name: String,
+    lvl3_module_name: String,
 }
 
 #[derive(WasmTypeGen, Debug, Default)]
@@ -191,9 +192,9 @@ impl L0CodeWriter {
                     // first, parse the fn_signature
                     let full_fn = format!("{} {{ {} }}", signature, body);
                     let tokens = TokenStream::from_str(&full_fn)
-                        .map_err(|e| compiler_error(&format!("Module {} provided invalid function signature\n{:?}", requestor, e)))?;
+                        .map_err(|e| compiler_error(&format!("Module {} provided invalid function signature '{}'\n{:?}", requestor, signature, e)))?;
                     let item_fn = syn::parse2::<ItemFn>(tokens.clone())
-                        .map_err(|e| compiler_error(&format!("Module {} provided invalid function signature\n{:?}", requestor, e)))?;
+                        .map_err(|e| compiler_error(&format!("Module {} provided invalid function signature '{}'\n{:?}", requestor, signature, e)))?;
                     let sig = parse_fn_signature(&item_fn);
                     let fn_name = &sig.name;
                     // check if this requestor is allowed to write this function:
@@ -381,6 +382,10 @@ impl L0Core {
         }
         Ok(())
     }
+    pub fn initialize_capabilities(&mut self, _conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
+        self.lvl3_module_name = module.name.clone();
+        Ok(())
+    }
     pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
         // apply compiler error if any
         if !self.compiler_error_message.is_empty() {
@@ -501,6 +506,7 @@ impl L0Core {
             compiler_warning_message: Default::default(),
             module_outputs: Default::default(),
             current_module_name: Default::default(),
+            lvl3_module_name: Default::default(),
         }
     }
 
@@ -518,6 +524,19 @@ impl L0Core {
                 self.module_outputs.insert(self.current_module_name.clone(), map);
             }
         }
+    }
+    /// this is the name of the user's module where they are referencing your module.
+    /// eg: if your module is `my_dependency`, then the user's module name would be `mymod3`
+    /// in this example:
+    /// ```rust,ignore
+    /// pub mod my_dependency { ... }
+    /// 
+    /// pub mod mymod3 {
+    ///     pub fn config(input: &mut my_dependency::Input) {}
+    /// }
+    /// ```
+    pub fn users_module_name(&self) -> String {
+        self.lvl3_module_name.clone()
     }
 
     pub fn compiler_error(&mut self, err: &str) {
