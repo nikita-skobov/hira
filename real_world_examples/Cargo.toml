@@ -1,0 +1,15 @@
+[package]
+name = "real_world_examples"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hira = { path = "../hira" }
+hira_lib = { path = "../hira_lib" }
+tokio = { version = "*", features = ["full"]}
+lambda_runtime = "*"
+serde = { version = "*", features = ["derive"]}
+serde_json = "*"
+
+# our module depends on these other hira modules:
+aws_lambda = { path = "../level2/aws_lambda" }
