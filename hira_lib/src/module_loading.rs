@@ -196,6 +196,15 @@ impl HiraModule2 {
         }
     }
 
+    pub fn visit_lvl2_dependency_names(&self, conf: &HiraConfig, cb: &mut impl FnMut(&str)) {
+        for dep in self.compile_dependencies.iter() {
+            if let DependencyTypeName::Mod1Or2(dep_name) = dep {
+                cb(&dep_name);
+                Self::visit_dependencies_recursively(dep_name, conf, cb);
+            }
+        }
+    }
+
     pub fn has_output(&self, k: &str, conf: &HiraConfig) -> bool {
         for output in self.outputs.iter() {
             match output {
@@ -246,6 +255,25 @@ impl HiraModule2 {
         Ok(l2_dep_name.to_string())
     }
 
+    /// given a level2 module ,iterate through all its dependencies
+    /// and verify the hira config has them loaded, and if not:
+    /// try to load them from cache
+    pub fn verify_dependencies2_exist_or_load(&mut self, conf: &mut HiraConfig) -> Result<(), TokenStream> {
+        let mut all_transient_deps = HashSet::new();
+        self.visit_lvl2_dependency_names(&conf, &mut |dep| {
+            all_transient_deps.insert(dep.to_string());
+        });
+        // iterate over all dependencies and try to load them if they dont exist
+        for dep in all_transient_deps {
+            if conf.modules2.contains_key(&dep) { continue; }
+            // havent loaded this dependency yet. try to load from cache:
+            let mut loaded = Self::load_from_cache(&conf.module_cache_directory, &dep)?;
+            loaded.verify_dependencies2_exist_or_load(conf)?;
+            conf.modules2.insert(loaded.name.to_string(), loaded);
+        }
+        Ok(())
+    }
+
     /// given a level3 module, iterate through all its dependencies
     /// and verify the hira config has them loaded, and if not:
     /// try to load them from cache
@@ -258,9 +286,9 @@ impl HiraModule2 {
         // iterate over all dependencies and try to load them if they dont exist
         for dep in all_transient_deps {
             if conf.modules2.contains_key(&dep) { continue; }
-
             // havent loaded this dependency yet. try to load from cache:
-            let loaded = Self::load_from_cache(&conf.module_cache_directory, &dep)?;
+            let mut loaded = Self::load_from_cache(&conf.module_cache_directory, &dep)?;
+            loaded.verify_dependencies2_exist_or_load(conf)?;
             conf.modules2.insert(loaded.name.to_string(), loaded);
         }
         Ok(())
