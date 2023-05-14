@@ -1,0 +1,13 @@
+[package]
+name = "aws_lambda"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hira = { path = "../../hira" }
+hira_lib = { path = "../../hira_lib" }
+aws_regions = { path = "../aws_regions" }
+aws_cfn = { path = "../aws_cfn" }
+serde = { version = "*", features = ["derive"]}
