@@ -94,6 +94,7 @@ pub struct L0Core {
     module_outputs: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
     current_module_name: String,
     lvl3_module_name: String,
+    crate_name: String,
 }
 
 #[derive(WasmTypeGen, Debug, Default)]
@@ -384,6 +385,7 @@ impl L0Core {
     }
     pub fn initialize_capabilities(&mut self, _conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
         self.lvl3_module_name = module.name.clone();
+        self.crate_name = std::env::var("CARGO_CRATE_NAME").unwrap_or("".to_string());
         Ok(())
     }
     pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
@@ -507,6 +509,7 @@ impl L0Core {
             module_outputs: Default::default(),
             current_module_name: Default::default(),
             lvl3_module_name: Default::default(),
+            crate_name: Default::default(),
         }
     }
 
@@ -537,6 +540,11 @@ impl L0Core {
     /// ```
     pub fn users_module_name(&self) -> String {
         self.lvl3_module_name.clone()
+    }
+
+    /// the name of the crate that will be compiled
+    pub fn crate_name(&self) -> String {
+        self.crate_name.clone()
     }
 
     pub fn compiler_error(&mut self, err: &str) {
