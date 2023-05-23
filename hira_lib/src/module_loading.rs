@@ -415,6 +415,16 @@ pub fn get_all_extern_crates(conf: &mut HiraConfig, module: &mut HiraModule2) ->
     all_externs.drain().map(|x| x.to_string()).collect()
 }
 
+pub fn should_compile() -> bool {
+    if let Ok(val) = std::env::var("RUST_BACKTRACE") {
+        // rust-analyzer always outputs short:
+        // https://github.com/rust-lang/rust-analyzer/blob/master/crates/rust-analyzer/src/bin/main.rs#L110
+        // if that changes ^ we're in trouble.
+        if val == "short" { return false }
+    }
+    true
+}
+
 pub fn hira_mod2_inner(conf: &mut HiraConfig, mut stream: TokenStream) -> Result<TokenStream, TokenStream> {
     let mut module = parse_module_from_stream(stream.clone())?;
     module.verify_config_signature(conf)?;
@@ -427,6 +437,19 @@ pub fn hira_mod2_inner(conf: &mut HiraConfig, mut stream: TokenStream) -> Result
         // in another crate
         module.cache_to_disk(&conf.module_cache_directory);
         conf.modules2.insert(module.name.clone(), module);
+        return Ok(stream);
+    }
+    // originally i had the idea that itd be nice to get compiler errors
+    // as you type in your editor, so you can get a quicker feedback loop.
+    // this means on every file save, your typehint program would run cargo check
+    // which would invoke hira, which would compile wasm, run it, and return the output.
+    // this, however, takes way too long to be considered quick, particularly for
+    // hira modules that have big dependencies like serde.
+    // instead, what i've decided to do is to try to not compile any wasm if
+    // we detect that we're being invoked from cargo check. this isn't a foolproof method
+    // but a quick/dirty way is to check if we have RUST_BACKTRACE=full or not (cargo build
+    // uses full, whereas cargo check uses short by default)
+    if !should_compile() {
         return Ok(stream);
     }
 
