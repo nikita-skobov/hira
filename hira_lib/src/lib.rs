@@ -44,11 +44,22 @@ pub struct HiraConfig {
     pub hira_base_code: String,
 
     pub modules2: HashMap<String, module_loading::HiraModule2>,
+
+    /// a map of runtime names to a list of statements that should be
+    /// in the main function for that runtime.
+    pub runtimes: HashMap<String, Vec<String>>,
 }
 
 impl HiraConfig {
     fn get_mod2(&self, name: &str) -> Option<&module_loading::HiraModule2> {
         self.modules2.get(name)
+    }
+    fn add_to_runtime(&mut self, runtime_name: String, runtime_code: String) {
+        if let Some(existing) = self.runtimes.get_mut(&runtime_name) {
+            existing.push(runtime_code);
+        } else {
+            self.runtimes.insert(runtime_name, vec![runtime_code]);
+        }
     }
     fn new() -> Self {
         let mut out = Self::default();
@@ -670,6 +681,63 @@ pub mod e2e_tests {
         let err = res.err().unwrap();
         let err_str = err.to_string();
         assert_contains_str(err_str, "had a dependency that attempted to write file you_got_hacked.txt, but allowed files are only");
+    }
+
+    #[test]
+    fn mod2_requires_runtime_permissions_to_be_defined_statically() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0RuntimeCreator;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub fn config(input: &mut Input, l0r: &mut L0RuntimeCreator) {
+                        l0r.add_to_runtime("hello", "world();".to_string());
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let res = e2e_module2_run(&code,|_| {});
+        let err = res.err().unwrap();
+        let err_str = err.to_string();
+        assert_contains_str(err_str, "requested to use runtime hello but no RUNTIME capability was found");
+    }
+
+    #[test]
+    fn mod2_can_set_runtimes() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0RuntimeCreator;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[("RUNTIME", &["hello"])];
+                    pub fn config(input: &mut Input, l0r: &mut L0RuntimeCreator) {
+                        l0r.add_to_runtime("hello", "world();".to_string());
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let res = e2e_module2_run(&code,|_| {});
+        let conf = res.ok().unwrap();
+        assert_eq!(conf.runtimes["hello"].len(), 1);
+        assert_eq!(conf.runtimes["hello"][0], "world();");
     }
 
     #[test]

@@ -46,6 +46,8 @@ pub struct LibraryObj {
     pub l0_code_reader: L0CodeReader,
 
     pub l0_code_writer: L0CodeWriter,
+
+    pub l0_runtime_creator: L0RuntimeCreator,
 }
 
 
@@ -54,6 +56,7 @@ impl LibraryObj {
         self.l0_core.apply_changes(conf, module, stream)?;
         self.l0_append_file.apply_changes(conf, module, stream)?;
         self.l0_code_writer.apply_changes(conf, module, stream)?;
+        self.l0_runtime_creator.apply_changes(conf, module, stream)?;
         Ok(())
     }
     pub fn initialize_capabilities(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
@@ -61,6 +64,7 @@ impl LibraryObj {
         self.l0_append_file.initialize_capabilities(conf, module)?;
         self.l0_code_reader.initialize_capabilities(conf, module)?;
         self.l0_code_writer.initialize_capabilities(conf, module)?;
+        self.l0_runtime_creator.initialize_capabilities(conf, module)?;
         Ok(())
     }
 }
@@ -107,6 +111,18 @@ pub struct L0CodeReader {
 pub struct L0CodeWriter {
     current_module_name: String,
     functions: std::collections::HashMap<String, std::collections::HashMap::<String, String>>,
+}
+
+#[derive(WasmTypeGen, Debug, Default)]
+pub struct L0RuntimeCreator {
+    current_module_name: String,
+    runtimes: std::collections::HashMap<String, Vec<RuntimeInfo>>,
+}
+
+#[derive(WasmTypeGen, Debug, Default)]
+pub struct RuntimeInfo {
+    pub creator: String,
+    pub code: String,
 }
 
 #[derive(Default, Debug)]
@@ -311,6 +327,26 @@ impl L0AppendFile {
         let mapped_data = to_map_entry(contents);
         conf.output_shared_files(&module.name, mapped_data)?;
         out
+    }
+}
+
+impl L0RuntimeCreator {
+    pub fn initialize_capabilities(&mut self, _conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
+        Ok(())
+    }
+    pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
+        let mut params = get_all_capability_params(conf, &module, &["RUNTIME"]);
+        let runtime_params = params.remove("RUNTIME").unwrap();
+        for (runtime_name, runtime_info) in self.runtimes.drain() {
+            for info in runtime_info {
+                let RuntimeInfo { creator, code } = info;
+                if !runtime_params.iter().any(|x| x.0 == *creator && x.1 == *runtime_name) {
+                    return Err(compiler_error(&format!("Module '{}' requested to use runtime {} but no RUNTIME capability was found", creator, runtime_name)));
+                }
+                conf.add_to_runtime(runtime_name.to_string(), code);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -560,7 +596,19 @@ impl L0Core {
     }
 }
 
-
+#[output_and_stringify_basic_const(RUNTIME_IMPL)]
+impl L0RuntimeCreator {
+    pub fn new() -> Self {
+        Self { current_module_name: Default::default(), runtimes: Default::default() }
+    }
+    pub fn add_to_runtime(&mut self, runtime_name: &str, code: String) {
+        if let Some(existing) = self.runtimes.get_mut(runtime_name) {
+            existing.push(RuntimeInfo { creator: self.current_module_name.to_string(), code });
+        } else {
+            self.runtimes.insert(runtime_name.to_string(), vec![RuntimeInfo { creator: self.current_module_name.to_string(), code }]);
+        }
+    }
+}
 
 #[output_and_stringify_basic_const(CODE_READER_IMPL)]
 impl L0CodeReader {
@@ -611,6 +659,7 @@ impl LibraryObj {
         self.l0_core.current_module_name = name.to_string();
         self.l0_kv_reader.current_module_name = name.to_string();
         self.l0_code_writer.current_module_name = name.to_string();
+        self.l0_runtime_creator.current_module_name = name.to_string();
     }
 
     // if adding a new l0 functionality,
@@ -624,6 +673,7 @@ impl LibraryObj {
             l0_append_file: L0AppendFile::new(),
             l0_code_reader: L0CodeReader::new(),
             l0_code_writer: L0CodeWriter::new(),
+            l0_runtime_creator: L0RuntimeCreator::new(),
         }
     }
 }
@@ -631,6 +681,6 @@ impl LibraryObj {
 pub fn get_include_string() -> &'static [&'static str] {
     &[
         LIBRARY_OBJ_IMPL, FILE_IMPL, CORE_IMPL, KV_IMPL, CODE_READER_IMPL,
-        CODE_WRITER_IMPL,
+        CODE_WRITER_IMPL, RUNTIME_IMPL,
     ]
 }
