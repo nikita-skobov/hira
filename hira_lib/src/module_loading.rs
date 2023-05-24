@@ -385,11 +385,47 @@ impl HiraModule2 {
     }
 }
 
+// fn get_process_info(id: &str) -> String {
+//     let cmd = std::process::Command::new("ps")
+//         .arg("-p")
+//         .arg(id)
+//         .arg("-lF")
+//         .output().expect("Failed to get process info");
+//     String::from_utf8_lossy(&cmd.stdout).to_string()
+// }
+
+// fn print_debug_stuff() {
+//     use std::io::Write;
+//     let id = std::process::id();
+//     let id_str = id.to_string();
+//     let process_info = get_process_info(&id_str);
+//     let out_f = "/home/madmin/hira.log";
+//     let mut out_f = std::fs::File::options().create(true).append(true).open(out_f).expect("Failed to open log file");
+//     let (parent_id, parent_process_info) = if let Some((_, b)) = process_info.split_once(&id_str) {
+//         let b = b.trim();
+//         if let Some((parent_id, _)) = b.split_once(" ") {
+//             (parent_id.trim().to_string(), get_process_info(parent_id.trim()))
+//         } else {
+//             ("".to_string(), "".to_string())
+//         }
+//     } else { ("".to_string(), "".to_string()) };
+//     let my_process_info = format!("__PROC_ID:{}\n{}", id, process_info);
+//     let parent_process_info = format!("__PARENT_PROC_ID:{}\n{}", parent_id, parent_process_info);
+//     out_f.write_all(my_process_info.as_bytes()).expect("Failed to write proc id");
+//     out_f.write_all(parent_process_info.as_bytes()).expect("Failed to write proc id");
+//     for (key, val) in std::env::vars() {
+//         let out = format!("{}:{}\n", key, val);
+//         out_f.write_all(out.as_bytes()).expect("Failed to write to log file");
+//     }
+//     out_f.write_all("\n\n".as_bytes()).expect("Failed...");
+// }
+
 /// corresponds to the main hira_mod! macro
 pub fn hira_mod2(mut stream: TokenStream, mut _attr: TokenStream) -> TokenStream {
     let mut out = Err(default_stream());
     let out_ref = &mut out;
     use_hira_config(|conf| {
+        // print_debug_stuff();
         let stream = std::mem::take(&mut stream);
         // let attr = std::mem::take(&mut attr);
         *out_ref = hira_mod2_inner(conf, stream);
