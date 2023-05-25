@@ -340,12 +340,13 @@ impl L0RuntimeCreator {
         for (runtime_name, runtime_info) in self.runtimes.drain() {
             for info in runtime_info {
                 let RuntimeInfo { creator, code } = info;
-                if !runtime_params.iter().any(|x| x.0 == *creator && x.1 == *runtime_name) {
+                if !runtime_params.iter().any(|x| x.0 == *creator) {
                     return Err(compiler_error(&format!("Module '{}' requested to use runtime {} but no RUNTIME capability was found", creator, runtime_name)));
                 }
                 conf.add_to_runtime(runtime_name.to_string(), code);
             }
         }
+        conf.output_runtimes(stream)?;
         Ok(())
     }
 }

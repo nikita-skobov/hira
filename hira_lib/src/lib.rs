@@ -26,6 +26,7 @@ pub struct HiraConfig {
     pub modules_directory: String,
     pub wasm_directory: String,
     pub gen_directory: String,
+    pub build_script_path: String,
     /// this directory is in the user's target/ folder.
     /// its purpose is to cache the module source code such that
     /// if the user loads a dependency from another crate, as long as that
@@ -47,7 +48,10 @@ pub struct HiraConfig {
 
     /// a map of runtime names to a list of statements that should be
     /// in the main function for that runtime.
-    pub runtimes: HashMap<String, Vec<String>>,
+    /// the value contains a bool that indicates if the runtime was already written out
+    /// to the main file or not.
+    pub runtimes: HashMap<String, (bool, Vec<String>)>,
+    pub has_deleted_build_script: bool,
 }
 
 impl HiraConfig {
@@ -55,10 +59,10 @@ impl HiraConfig {
         self.modules2.get(name)
     }
     fn add_to_runtime(&mut self, runtime_name: String, runtime_code: String) {
-        if let Some(existing) = self.runtimes.get_mut(&runtime_name) {
+        if let Some((_, existing)) = self.runtimes.get_mut(&runtime_name) {
             existing.push(runtime_code);
         } else {
-            self.runtimes.insert(runtime_name, vec![runtime_code]);
+            self.runtimes.insert(runtime_name, (false, vec![runtime_code]));
         }
     }
     fn new() -> Self {
@@ -227,6 +231,48 @@ impl HiraConfig {
         Ok(())
     }
 
+    fn append_to_build_script(runtime_name: &str, path: &str, target_dir: &str) -> Result<(), TokenStream> {
+        let mut f = std::fs::File::options().create(true).append(true).open(path)
+            .map_err(|e| compiler_error(&format!("Failed to open {}\n{:?}", path, e)))?;
+        // TODO: allow setting target, changing to release, extra opts, etc.
+        let cmd = format!("CARGO_WASMTYPEGEN_FILEOPS=\"0\" RUSTFLAGS=\"--cfg {runtime_name}\" cargo rustc \\\n    --crate-type=bin \\\n    --target-dir {target_dir}\n");
+        f.write_all(cmd.as_bytes()).map_err(|e| compiler_error(&format!("Failed to write to {}\n{:?}", path, e)))?;
+        Ok(())
+    }
+
+    fn output_runtimes(&mut self, stream: &mut TokenStream) -> Result<(), TokenStream> {
+        if !self.has_deleted_build_script {
+            let _ = std::fs::remove_file(&self.build_script_path);
+            self.has_deleted_build_script = true;
+        }
+        for (runtime_name, (already_output, code)) in self.runtimes.iter_mut() {
+            let runtime_include_file = format!("{}/{}.rs.txt", self.wasm_directory, runtime_name);
+            if !*already_output {
+                // write out the runtime main function to the stream:
+                let tokens = format!("#[cfg({runtime_name})]\n#[allow(incomplete_include)]\n#[tokio::main]\nasync fn main() {{ include!(\"{runtime_include_file}\"); }}")
+                    .parse::<TokenStream>()
+                    .map_err(|e| compiler_error(&format!("Failed to output runtime {}\n{:?}", runtime_name, e)))?;
+                *already_output = true;
+                let target_dir = format!("{}/target_{}", self.wasm_directory, runtime_name);
+                Self::append_to_build_script(runtime_name, &self.build_script_path, &target_dir)?;
+                stream.extend(tokens);
+            }
+            if !self.should_do_file_ops {
+                continue;
+            }
+            let mut out_s = "[".to_string();
+            for line in code {
+                out_s.push_str(line);
+                out_s.push(',');
+                out_s.push('\n');
+            }
+            out_s.push(']');
+            std::fs::write(&runtime_include_file, out_s)
+                .map_err(|e| compiler_error(&format!("Failed to write runtime file {}\n{:?}", runtime_include_file, e)))?;
+        }
+        Ok(())
+    }
+
     fn set_directories(&mut self) {
         let base_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(".".into());
         let target_dir = std::env::var("CARGO_HOME").unwrap_or(".".into());
@@ -236,6 +282,7 @@ impl HiraConfig {
         self.wasm_directory = format!("{}/{HIRA_WASM_DIR_NAME}", self.hira_directory);
         self.gen_directory = format!("{}/{HIRA_GEN_DIR_NAME}", self.hira_directory);
         self.module_cache_directory = format!("{}/{HIRA_DIR_NAME}/cached_modules", target_dir);
+        self.build_script_path = format!("{}/build.sh", self.cargo_directory);
     }
 
     fn load_cargo_toml(&mut self) {
@@ -310,6 +357,7 @@ pub mod e2e_tests {
         let path = path.canonicalize().expect("Failed to canonicalize test_out directory");
         let full_path_str = path.to_string_lossy().to_string();
         conf.wasm_directory = full_path_str;
+        conf.build_script_path = format!("{}/build.sh", conf.wasm_directory);
 
         conf_cb(&mut conf);
         let mut stream = TokenStream::new();
@@ -721,7 +769,7 @@ pub mod e2e_tests {
                     pub struct Input {
                         pub _unused: bool,
                     }
-                    pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[("RUNTIME", &["hello"])];
+                    pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[("RUNTIME", &[""])];
                     pub fn config(input: &mut Input, l0r: &mut L0RuntimeCreator) {
                         l0r.add_to_runtime("hello", "world();".to_string());
                     }
@@ -736,8 +784,8 @@ pub mod e2e_tests {
         ];
         let res = e2e_module2_run(&code,|_| {});
         let conf = res.ok().unwrap();
-        assert_eq!(conf.runtimes["hello"].len(), 1);
-        assert_eq!(conf.runtimes["hello"][0], "world();");
+        assert_eq!(conf.runtimes["hello"].1.len(), 1);
+        assert_eq!(conf.runtimes["hello"].1[0], "world();");
     }
 
     #[test]
