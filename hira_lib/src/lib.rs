@@ -17,6 +17,7 @@ pub const HIRA_DIR_NAME: &'static str = "hira";
 pub const HIRA_WASM_DIR_NAME: &'static str = "wasm_out";
 pub const HIRA_GEN_DIR_NAME: &'static str = "generated";
 pub const HIRA_MODULES_DIR_NAME: &'static str = "modules";
+pub const HIRA_RUNTIMES_DIR_NAME: &'static str = "runtimes";
 
 
 #[derive(Default, Debug)]
@@ -27,6 +28,8 @@ pub struct HiraConfig {
     pub wasm_directory: String,
     pub gen_directory: String,
     pub build_script_path: String,
+    pub runtime_directory: String,
+    pub crate_name: String,
     /// this directory is in the user's target/ folder.
     /// its purpose is to cache the module source code such that
     /// if the user loads a dependency from another crate, as long as that
@@ -231,11 +234,16 @@ impl HiraConfig {
         Ok(())
     }
 
-    fn append_to_build_script(runtime_name: &str, path: &str, target_dir: &str) -> Result<(), TokenStream> {
+    fn append_to_build_script(
+        runtime_name: &str, path: &str,
+        target_dir: &str, crate_name: &str,
+        output_file: &str
+    ) -> Result<(), TokenStream> {
         let mut f = std::fs::File::options().create(true).append(true).open(path)
             .map_err(|e| compiler_error(&format!("Failed to open {}\n{:?}", path, e)))?;
         // TODO: allow setting target, changing to release, extra opts, etc.
-        let cmd = format!("CARGO_WASMTYPEGEN_FILEOPS=\"0\" RUSTFLAGS=\"--cfg {runtime_name}\" cargo rustc \\\n    --crate-type=bin \\\n    --target-dir {target_dir}\n");
+        let mut cmd = format!("CARGO_WASMTYPEGEN_FILEOPS=\"0\" RUSTFLAGS=\"--cfg {runtime_name}\" cargo rustc \\\n    --crate-type=bin \\\n    --profile $profile \\\n    --target-dir {target_dir}\n");
+        cmd.push_str(&format!("cp {target_dir}/$location/{crate_name} {output_file}\n"));
         f.write_all(cmd.as_bytes()).map_err(|e| compiler_error(&format!("Failed to write to {}\n{:?}", path, e)))?;
         Ok(())
     }
@@ -243,7 +251,17 @@ impl HiraConfig {
     fn output_runtimes(&mut self, stream: &mut TokenStream) -> Result<(), TokenStream> {
         if !self.has_deleted_build_script {
             let _ = std::fs::remove_file(&self.build_script_path);
+            let _ = std::fs::create_dir_all(&self.runtime_directory);
             self.has_deleted_build_script = true;
+            let out = format!(r#"
+profile="${{1:-dev}}"
+location=$profile
+if [[ $profile == "dev" ]]; then
+    location="debug"
+fi
+"#);
+            std::fs::write(&self.build_script_path, out)
+                .map_err(|e| compiler_error(&format!("Failed to create build script at {}\n{:?}", self.build_script_path, e)))?;
         }
         for (runtime_name, (already_output, code)) in self.runtimes.iter_mut() {
             let runtime_include_file = format!("{}/{}.rs.txt", self.wasm_directory, runtime_name);
@@ -254,7 +272,8 @@ impl HiraConfig {
                     .map_err(|e| compiler_error(&format!("Failed to output runtime {}\n{:?}", runtime_name, e)))?;
                 *already_output = true;
                 let target_dir = format!("{}/target_{}", self.wasm_directory, runtime_name);
-                Self::append_to_build_script(runtime_name, &self.build_script_path, &target_dir)?;
+                let hira_runtime_output_path = format!("{}/{}", self.runtime_directory, runtime_name);
+                Self::append_to_build_script(runtime_name, &self.build_script_path, &target_dir, &self.crate_name, &hira_runtime_output_path)?;
                 stream.extend(tokens);
             }
             if !self.should_do_file_ops {
@@ -276,6 +295,7 @@ impl HiraConfig {
     fn set_directories(&mut self) {
         let base_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or(".".into());
         let target_dir = std::env::var("CARGO_HOME").unwrap_or(".".into());
+        let crate_name = std::env::var("CARGO_CRATE_NAME").unwrap_or("UNKNOWN_CRATE_NAME".into());
         self.cargo_directory = base_dir;
         self.hira_directory = format!("{}/{HIRA_DIR_NAME}", self.cargo_directory);
         self.modules_directory = format!("{}/{HIRA_MODULES_DIR_NAME}", self.hira_directory);
@@ -283,6 +303,8 @@ impl HiraConfig {
         self.gen_directory = format!("{}/{HIRA_GEN_DIR_NAME}", self.hira_directory);
         self.module_cache_directory = format!("{}/{HIRA_DIR_NAME}/cached_modules", target_dir);
         self.build_script_path = format!("{}/build.sh", self.cargo_directory);
+        self.runtime_directory = format!("{}/{HIRA_RUNTIMES_DIR_NAME}", self.hira_directory);
+        self.crate_name = crate_name;
     }
 
     fn load_cargo_toml(&mut self) {

@@ -394,7 +394,7 @@ impl HiraModule2 {
 //     String::from_utf8_lossy(&cmd.stdout).to_string()
 // }
 
-// fn print_debug_stuff() {
+// pub fn print_debug_stuff() {
 //     use std::io::Write;
 //     let id = std::process::id();
 //     let id_str = id.to_string();
