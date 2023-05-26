@@ -61,9 +61,17 @@ impl HiraConfig {
     fn get_mod2(&self, name: &str) -> Option<&module_loading::HiraModule2> {
         self.modules2.get(name)
     }
-    fn add_to_runtime(&mut self, runtime_name: String, meta: RuntimeMeta, runtime_code: String) {
+    fn add_to_runtime(&mut self, runtime_name: String, meta: RuntimeMeta, runtime_code: String, unique_code: bool) {
         if let Some((_, _, existing)) = self.runtimes.get_mut(&runtime_name) {
-            existing.push(runtime_code);
+            if unique_code {
+                // if user wants this line to be unique, then only add it if
+                // it doesnt already exist
+                if !existing.contains(&runtime_code) {
+                    existing.push(runtime_code);
+                }
+            } else {
+                existing.push(runtime_code);
+            }
         } else {
             self.runtimes.insert(runtime_name, (false, meta, vec![runtime_code]));
         }
@@ -814,6 +822,37 @@ pub mod e2e_tests {
                     pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[("RUNTIME", &[""])];
                     pub fn config(input: &mut Input, l0r: &mut L0RuntimeCreator) {
                         l0r.add_to_runtime("hello", "world();".to_string());
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let res = e2e_module2_run(&code,|_| {});
+        let conf = res.ok().unwrap();
+        assert_eq!(conf.runtimes["hello"].2.len(), 1);
+        assert_eq!(conf.runtimes["hello"].2[0], "world();");
+    }
+
+    #[test]
+    fn mod2_can_set_runtimes_with_unique_code() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0RuntimeCreator;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[("RUNTIME", &[""])];
+                    pub fn config(input: &mut Input, l0r: &mut L0RuntimeCreator) {
+                        l0r.add_to_runtime_unique("hello", "world();".to_string());
+                        l0r.add_to_runtime_unique("hello", "world();".to_string());
+                        l0r.add_to_runtime_unique("hello", "world();".to_string());
                     }
                 }
             ),

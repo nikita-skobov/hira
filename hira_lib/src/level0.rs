@@ -123,6 +123,7 @@ pub struct L0RuntimeCreator {
 pub struct RuntimeInfo {
     pub creator: String,
     pub code: String,
+    pub unique_line: bool,
 }
 
 #[derive(WasmTypeGen, Debug, Default)]
@@ -352,11 +353,11 @@ impl L0RuntimeCreator {
         let runtime_params = params.remove("RUNTIME").unwrap();
         for (runtime_name, runtime_info) in self.runtimes.drain() {
             for info in runtime_info.code_lines {
-                let RuntimeInfo { creator, code } = info;
+                let RuntimeInfo { creator, code, unique_line } = info;
                 if !runtime_params.iter().any(|x| x.0 == *creator) {
                     return Err(compiler_error(&format!("Module '{}' requested to use runtime {} but no RUNTIME capability was found", creator, runtime_name)));
                 }
-                conf.add_to_runtime(runtime_name.to_string(), runtime_info.meta.clone(), code);
+                conf.add_to_runtime(runtime_name.to_string(), runtime_info.meta.clone(), code, unique_line);
             }
         }
         conf.output_runtimes(stream)?;
@@ -615,22 +616,41 @@ impl L0RuntimeCreator {
     pub fn new() -> Self {
         Self { current_module_name: Default::default(), runtimes: Default::default() }
     }
+    /// add code to the entrypoint of the runtime you define. runtime_name will become the
+    /// name of an executable, and code is a line of code in the main function. Note
+    /// that code must not end in a semicolon, and must evaluate to ().
+    /// for example this is valid `my_function()`, same as `my_error_function().expect("error")`
+    /// but this would not be valid: `let x = 2;`
     pub fn add_to_runtime(&mut self, runtime_name: &str, code: String) {
+        self.add_to_runtime_ex(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
+    }
+
+    /// same as `add_to_runtime`, but the line of code is guaranteed to be unique in the main function.
+    /// use this when your module can be potentially called many times, and you wish to ensure
+    /// that your entrypoint only executes this line of code once.
+    pub fn add_to_runtime_unique(&mut self, runtime_name: &str, code: String) {
+        self.add_to_runtime_ex_unique(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
+    }
+
+    /// same as `add_to_runtime`, but provide metadata for how this runtime should be compiled.
+    /// for example can explicitly set a profile, can change the name of the program compiling,
+    /// special targets, etc.
+    pub fn add_to_runtime_ex(&mut self, runtime_name: &str, code: String, meta: RuntimeMeta) {
+        self.add_to_runtime_ex_inner(runtime_name, code, meta, false)
+    }
+
+    pub fn add_to_runtime_ex_inner(&mut self, runtime_name: &str, code: String, meta: RuntimeMeta, unique_line: bool) {
         if let Some(existing) = self.runtimes.get_mut(runtime_name) {
-            existing.code_lines.push(RuntimeInfo { creator: self.current_module_name.to_string(), code });
+            existing.code_lines.push(RuntimeInfo { creator: self.current_module_name.to_string(), code, unique_line });
         } else {
-            let code_lines = vec![RuntimeInfo { creator: self.current_module_name.to_string(), code }];
-            self.runtimes.insert(runtime_name.to_string(), RuntimeData { code_lines, meta: RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() } });
+            let code_lines = vec![RuntimeInfo { creator: self.current_module_name.to_string(), code, unique_line }];
+            self.runtimes.insert(runtime_name.to_string(), RuntimeData { code_lines, meta });
         }
     }
 
-    pub fn add_to_runtime_ex(&mut self, runtime_name: &str, code: String, meta: RuntimeMeta) {
-        if let Some(existing) = self.runtimes.get_mut(runtime_name) {
-            existing.code_lines.push(RuntimeInfo { creator: self.current_module_name.to_string(), code });
-        } else {
-            let code_lines = vec![RuntimeInfo { creator: self.current_module_name.to_string(), code }];
-            self.runtimes.insert(runtime_name.to_string(), RuntimeData { code_lines, meta });
-        }
+    /// same as `add_to_runtime_ex`, but the line of code will be unique.
+    pub fn add_to_runtime_ex_unique(&mut self, runtime_name: &str, code: String, meta: RuntimeMeta) {
+        self.add_to_runtime_ex_inner(runtime_name, code, meta, true)
     }
 }
 
