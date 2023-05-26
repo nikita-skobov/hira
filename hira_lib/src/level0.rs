@@ -129,6 +129,7 @@ pub struct RuntimeInfo {
 #[derive(WasmTypeGen, Debug, Default)]
 pub struct RuntimeData {
     pub code_lines: Vec<RuntimeInfo>,
+    pub shared_data: Vec<String>,
     pub meta: RuntimeMeta,
 }
 
@@ -359,6 +360,7 @@ impl L0RuntimeCreator {
                 }
                 conf.add_to_runtime(runtime_name.to_string(), runtime_info.meta.clone(), code, unique_line);
             }
+            conf.set_runtime_data(&runtime_name, runtime_info.shared_data);
         }
         conf.output_runtimes(stream)?;
         Ok(())
@@ -644,7 +646,24 @@ impl L0RuntimeCreator {
             existing.code_lines.push(RuntimeInfo { creator: self.current_module_name.to_string(), code, unique_line });
         } else {
             let code_lines = vec![RuntimeInfo { creator: self.current_module_name.to_string(), code, unique_line }];
-            self.runtimes.insert(runtime_name.to_string(), RuntimeData { code_lines, meta });
+            self.runtimes.insert(runtime_name.to_string(), RuntimeData { code_lines, meta, shared_data: vec![] });
+        }
+    }
+
+    /// the `data_line` string will be added to a shared data array called `runtime_data`.
+    /// your runtime code can then reference this `runtime_data` array. For example:
+    /// ```rust,ignore
+    /// add_to_runtime("hello", "my_function(runtime_data)".to_string());
+    /// add_data_to_runtime("hello", "1");
+    /// add_data_to_runtime("hello", "2");
+    /// add_data_to_runtime("hello", "3");
+    /// ```
+    /// Will create a runtime called hello, who then immediately calls my_function with `runtime_data`, and
+    /// `runtime_data` is `["1", "2", "3"]`.
+    /// runtime_name must exist prior to calling this function.
+    pub fn add_data_to_runtime(&mut self, runtime_name: &str, data_line: String) {
+        if let Some(existing) = self.runtimes.get_mut(runtime_name) {
+            existing.shared_data.push(data_line);
         }
     }
 

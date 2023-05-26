@@ -53,7 +53,7 @@ pub struct HiraConfig {
     /// in the main function for that runtime.
     /// the value contains a bool that indicates if the runtime was already written out
     /// to the main file or not.
-    pub runtimes: HashMap<String, (bool, RuntimeMeta, Vec<String>)>,
+    pub runtimes: HashMap<String, (bool, RuntimeMeta, Vec<String>, Vec<String>)>,
     pub has_deleted_build_script: bool,
 }
 
@@ -62,7 +62,7 @@ impl HiraConfig {
         self.modules2.get(name)
     }
     fn add_to_runtime(&mut self, runtime_name: String, meta: RuntimeMeta, runtime_code: String, unique_code: bool) {
-        if let Some((_, _, existing)) = self.runtimes.get_mut(&runtime_name) {
+        if let Some((_, _, existing, _)) = self.runtimes.get_mut(&runtime_name) {
             if unique_code {
                 // if user wants this line to be unique, then only add it if
                 // it doesnt already exist
@@ -73,7 +73,12 @@ impl HiraConfig {
                 existing.push(runtime_code);
             }
         } else {
-            self.runtimes.insert(runtime_name, (false, meta, vec![runtime_code]));
+            self.runtimes.insert(runtime_name, (false, meta, vec![runtime_code], vec![]));
+        }
+    }
+    fn set_runtime_data(&mut self, runtime_name: &str, data: Vec<String>) {
+        if let Some((_, _, _, existing_data)) = self.runtimes.get_mut(runtime_name) {
+            *existing_data = data;
         }
     }
     fn new() -> Self {
@@ -277,6 +282,48 @@ impl HiraConfig {
         Ok(())
     }
 
+    /// forms the main entrypoint tokens for the runtime.
+    /// returns (tokens, file name of the runtime statements, file name of the runtime data)
+    fn generate_runtime_entrypoint(runtime_name: &str, directory: &str) -> Result<(TokenStream, String, String), TokenStream> {
+        let runtime_include_file = format!("{}/{}.rs.txt", directory, runtime_name);
+        let runtime_data_include_file = format!("{}/{}_data.rs.txt", directory, runtime_name);
+        let tokens = format!(r#"
+#[cfg({runtime_name})]
+#[allow(incomplete_include)]
+#[tokio::main]
+async fn main() {{
+    let runtime_data = include!("{runtime_data_include_file}");
+    include!("{runtime_include_file}");
+}}"#).parse::<TokenStream>()
+            .map_err(|e| compiler_error(&format!("Failed to output runtime {}: {:?}", runtime_name, e)))?;
+        Ok((tokens, runtime_include_file, runtime_data_include_file))
+    }
+
+    fn output_include_files(
+        runtime_include_file: &str,
+        runtime_data_include_file: &str,
+        code: &Vec<String>,
+        data: &Vec<String>,
+    ) -> Result<(), TokenStream> {
+        let mut out_s = "[".to_string();
+        for line in code {
+            out_s.push_str(line);
+            out_s.push(',');
+            out_s.push('\n');
+        }
+        out_s.push(']');
+        std::fs::write(&runtime_include_file, out_s)
+            .map_err(|e| compiler_error(&format!("Failed to write runtime file {}\n{:?}", runtime_include_file, e)))?;
+        let mut out_s = "[".to_string();
+        for line in data {
+            out_s.push_str(&format!("r#\"{line}\"#,\n"));
+        }
+        out_s.push(']');
+        std::fs::write(&runtime_data_include_file, out_s)
+            .map_err(|e| compiler_error(&format!("Failed to write runtime data file {}\n{:?}", runtime_data_include_file, e)))?;
+        Ok(())
+    }
+
     fn output_runtimes(&mut self, stream: &mut TokenStream) -> Result<(), TokenStream> {
         if !self.has_deleted_build_script && self.should_do_file_ops {
             let _ = std::fs::remove_file(&self.build_script_path);
@@ -292,30 +339,19 @@ fi
             std::fs::write(&self.build_script_path, out)
                 .map_err(|e| compiler_error(&format!("Failed to create build script at {}\n{:?}", self.build_script_path, e)))?;
         }
-        for (runtime_name, (already_output, meta, code)) in self.runtimes.iter_mut() {
-            let runtime_include_file = format!("{}/{}.rs.txt", self.wasm_directory, runtime_name);
+        for (runtime_name, (already_output, meta, code, data)) in self.runtimes.iter_mut() {
+            let (tokens, runtime_include_file, runtime_data_include_file) = Self::generate_runtime_entrypoint(runtime_name, &self.wasm_directory)?;
             if !*already_output {
                 // write out the runtime main function to the stream:
-                let tokens = format!("#[cfg({runtime_name})]\n#[allow(incomplete_include)]\n#[tokio::main]\nasync fn main() {{ include!(\"{runtime_include_file}\"); }}")
-                    .parse::<TokenStream>()
-                    .map_err(|e| compiler_error(&format!("Failed to output runtime {}\n{:?}", runtime_name, e)))?;
+                stream.extend(tokens);
                 *already_output = true;
                 let target_dir = format!("{}/target_{}", self.wasm_directory, runtime_name);
                 let hira_runtime_output_path = format!("{}/{}", self.runtime_directory, runtime_name);
                 if self.should_do_file_ops {
                     Self::append_to_build_script(meta, runtime_name, &self.build_script_path, &target_dir, &self.crate_name, &hira_runtime_output_path)?;
                 }
-                stream.extend(tokens);
             }
-            let mut out_s = "[".to_string();
-            for line in code {
-                out_s.push_str(line);
-                out_s.push(',');
-                out_s.push('\n');
-            }
-            out_s.push(']');
-            std::fs::write(&runtime_include_file, out_s)
-                .map_err(|e| compiler_error(&format!("Failed to write runtime file {}\n{:?}", runtime_include_file, e)))?;
+            Self::output_include_files(&runtime_include_file, &runtime_data_include_file, &code, &data)?;
         }
         Ok(())
     }
