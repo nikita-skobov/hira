@@ -270,7 +270,7 @@ impl HiraConfig {
     }
 
     fn output_runtimes(&mut self, stream: &mut TokenStream) -> Result<(), TokenStream> {
-        if !self.has_deleted_build_script {
+        if !self.has_deleted_build_script && self.should_do_file_ops {
             let _ = std::fs::remove_file(&self.build_script_path);
             let _ = std::fs::create_dir_all(&self.runtime_directory);
             self.has_deleted_build_script = true;
@@ -294,11 +294,10 @@ fi
                 *already_output = true;
                 let target_dir = format!("{}/target_{}", self.wasm_directory, runtime_name);
                 let hira_runtime_output_path = format!("{}/{}", self.runtime_directory, runtime_name);
-                Self::append_to_build_script(meta, runtime_name, &self.build_script_path, &target_dir, &self.crate_name, &hira_runtime_output_path)?;
+                if self.should_do_file_ops {
+                    Self::append_to_build_script(meta, runtime_name, &self.build_script_path, &target_dir, &self.crate_name, &hira_runtime_output_path)?;
+                }
                 stream.extend(tokens);
-            }
-            if !self.should_do_file_ops {
-                continue;
             }
             let mut out_s = "[".to_string();
             for line in code {
