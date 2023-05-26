@@ -116,13 +116,26 @@ pub struct L0CodeWriter {
 #[derive(WasmTypeGen, Debug, Default)]
 pub struct L0RuntimeCreator {
     current_module_name: String,
-    runtimes: std::collections::HashMap<String, Vec<RuntimeInfo>>,
+    runtimes: std::collections::HashMap<String, RuntimeData>,
 }
 
 #[derive(WasmTypeGen, Debug, Default)]
 pub struct RuntimeInfo {
     pub creator: String,
     pub code: String,
+}
+
+#[derive(WasmTypeGen, Debug, Default)]
+pub struct RuntimeData {
+    pub code_lines: Vec<RuntimeInfo>,
+    pub meta: RuntimeMeta,
+}
+
+#[derive(WasmTypeGen, Debug, Default, Clone)]
+pub struct RuntimeMeta {
+    pub cargo_cmd: String,
+    pub target: String,
+    pub profile: String,
 }
 
 #[derive(Default, Debug)]
@@ -331,19 +344,19 @@ impl L0AppendFile {
 }
 
 impl L0RuntimeCreator {
-    pub fn initialize_capabilities(&mut self, _conf: &mut HiraConfig, module: &mut HiraModule2) -> Result<(), TokenStream> {
+    pub fn initialize_capabilities(&mut self, _conf: &mut HiraConfig, _module: &mut HiraModule2) -> Result<(), TokenStream> {
         Ok(())
     }
     pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
         let mut params = get_all_capability_params(conf, &module, &["RUNTIME"]);
         let runtime_params = params.remove("RUNTIME").unwrap();
         for (runtime_name, runtime_info) in self.runtimes.drain() {
-            for info in runtime_info {
+            for info in runtime_info.code_lines {
                 let RuntimeInfo { creator, code } = info;
                 if !runtime_params.iter().any(|x| x.0 == *creator) {
                     return Err(compiler_error(&format!("Module '{}' requested to use runtime {} but no RUNTIME capability was found", creator, runtime_name)));
                 }
-                conf.add_to_runtime(runtime_name.to_string(), code);
+                conf.add_to_runtime(runtime_name.to_string(), runtime_info.meta.clone(), code);
             }
         }
         conf.output_runtimes(stream)?;
@@ -604,9 +617,19 @@ impl L0RuntimeCreator {
     }
     pub fn add_to_runtime(&mut self, runtime_name: &str, code: String) {
         if let Some(existing) = self.runtimes.get_mut(runtime_name) {
-            existing.push(RuntimeInfo { creator: self.current_module_name.to_string(), code });
+            existing.code_lines.push(RuntimeInfo { creator: self.current_module_name.to_string(), code });
         } else {
-            self.runtimes.insert(runtime_name.to_string(), vec![RuntimeInfo { creator: self.current_module_name.to_string(), code }]);
+            let code_lines = vec![RuntimeInfo { creator: self.current_module_name.to_string(), code }];
+            self.runtimes.insert(runtime_name.to_string(), RuntimeData { code_lines, meta: RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() } });
+        }
+    }
+
+    pub fn add_to_runtime_ex(&mut self, runtime_name: &str, code: String, meta: RuntimeMeta) {
+        if let Some(existing) = self.runtimes.get_mut(runtime_name) {
+            existing.code_lines.push(RuntimeInfo { creator: self.current_module_name.to_string(), code });
+        } else {
+            let code_lines = vec![RuntimeInfo { creator: self.current_module_name.to_string(), code }];
+            self.runtimes.insert(runtime_name.to_string(), RuntimeData { code_lines, meta });
         }
     }
 }

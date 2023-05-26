@@ -53,7 +53,7 @@ pub struct HiraConfig {
     /// in the main function for that runtime.
     /// the value contains a bool that indicates if the runtime was already written out
     /// to the main file or not.
-    pub runtimes: HashMap<String, (bool, Vec<String>)>,
+    pub runtimes: HashMap<String, (bool, RuntimeMeta, Vec<String>)>,
     pub has_deleted_build_script: bool,
 }
 
@@ -61,11 +61,11 @@ impl HiraConfig {
     fn get_mod2(&self, name: &str) -> Option<&module_loading::HiraModule2> {
         self.modules2.get(name)
     }
-    fn add_to_runtime(&mut self, runtime_name: String, runtime_code: String) {
-        if let Some((_, existing)) = self.runtimes.get_mut(&runtime_name) {
+    fn add_to_runtime(&mut self, runtime_name: String, meta: RuntimeMeta, runtime_code: String) {
+        if let Some((_, _, existing)) = self.runtimes.get_mut(&runtime_name) {
             existing.push(runtime_code);
         } else {
-            self.runtimes.insert(runtime_name, (false, vec![runtime_code]));
+            self.runtimes.insert(runtime_name, (false, meta, vec![runtime_code]));
         }
     }
     fn new() -> Self {
@@ -235,15 +235,36 @@ impl HiraConfig {
     }
 
     fn append_to_build_script(
+        meta: &RuntimeMeta,
         runtime_name: &str, path: &str,
         target_dir: &str, crate_name: &str,
         output_file: &str
     ) -> Result<(), TokenStream> {
         let mut f = std::fs::File::options().create(true).append(true).open(path)
             .map_err(|e| compiler_error(&format!("Failed to open {}\n{:?}", path, e)))?;
-        // TODO: allow setting target, changing to release, extra opts, etc.
-        let mut cmd = format!("CARGO_WASMTYPEGEN_FILEOPS=\"0\" RUSTFLAGS=\"--cfg {runtime_name}\" cargo rustc \\\n    --crate-type=bin \\\n    --profile $profile \\\n    --target-dir {target_dir}\n");
-        cmd.push_str(&format!("cp {target_dir}/$location/{crate_name} {output_file}\n"));
+        let cargo = if meta.cargo_cmd.is_empty() { "cargo" } else { meta.cargo_cmd.as_str() };
+        let profile = if meta.profile.is_empty() { "$profile" } else {
+            if meta.profile == "debug" {
+                "dev"
+            } else {
+                meta.profile.as_str()
+            }
+        };
+        let mut cmd = format!("CARGO_WASMTYPEGEN_FILEOPS=\"0\" RUSTFLAGS=\"--cfg {runtime_name}\" {cargo} rustc \\\n    --crate-type=bin \\\n    --profile {profile} \\\n");
+        let mut target_location = "".to_string();
+        if !meta.target.is_empty() {
+            cmd.push_str(&format!("    --target {} \\\n", meta.target));
+            target_location = format!("{}/", meta.target);
+        }
+        let location = if meta.profile.is_empty() { "$location" } else {
+            if meta.profile == "dev" {
+                "debug"
+            } else {
+                meta.profile.as_str()
+            }
+        };
+        cmd.push_str(&format!("    --target-dir {target_dir}\n"));
+        cmd.push_str(&format!("cp {target_dir}/{target_location}{location}/{crate_name} {output_file}\n"));
         f.write_all(cmd.as_bytes()).map_err(|e| compiler_error(&format!("Failed to write to {}\n{:?}", path, e)))?;
         Ok(())
     }
@@ -263,7 +284,7 @@ fi
             std::fs::write(&self.build_script_path, out)
                 .map_err(|e| compiler_error(&format!("Failed to create build script at {}\n{:?}", self.build_script_path, e)))?;
         }
-        for (runtime_name, (already_output, code)) in self.runtimes.iter_mut() {
+        for (runtime_name, (already_output, meta, code)) in self.runtimes.iter_mut() {
             let runtime_include_file = format!("{}/{}.rs.txt", self.wasm_directory, runtime_name);
             if !*already_output {
                 // write out the runtime main function to the stream:
@@ -273,7 +294,7 @@ fi
                 *already_output = true;
                 let target_dir = format!("{}/target_{}", self.wasm_directory, runtime_name);
                 let hira_runtime_output_path = format!("{}/{}", self.runtime_directory, runtime_name);
-                Self::append_to_build_script(runtime_name, &self.build_script_path, &target_dir, &self.crate_name, &hira_runtime_output_path)?;
+                Self::append_to_build_script(meta, runtime_name, &self.build_script_path, &target_dir, &self.crate_name, &hira_runtime_output_path)?;
                 stream.extend(tokens);
             }
             if !self.should_do_file_ops {
@@ -806,8 +827,8 @@ pub mod e2e_tests {
         ];
         let res = e2e_module2_run(&code,|_| {});
         let conf = res.ok().unwrap();
-        assert_eq!(conf.runtimes["hello"].1.len(), 1);
-        assert_eq!(conf.runtimes["hello"].1[0], "world();");
+        assert_eq!(conf.runtimes["hello"].2.len(), 1);
+        assert_eq!(conf.runtimes["hello"].2[0], "world();");
     }
 
     #[test]
