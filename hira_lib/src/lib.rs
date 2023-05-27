@@ -292,7 +292,8 @@ impl HiraConfig {
 #[allow(incomplete_include)]
 #[tokio::main]
 async fn main() {{
-    let mut runtime_data = include!("{runtime_data_include_file}").iter().map(|x| x.to_string()).collect::<Vec<String>>();
+    let d: &[&'static str] = &include!("{runtime_data_include_file}");
+    let mut runtime_data: Vec<String> = d.iter().map(|x| x.to_string()).collect();
     include!("{runtime_include_file}");
 }}"#).parse::<TokenStream>()
             .map_err(|e| compiler_error(&format!("Failed to output runtime {}: {:?}", runtime_name, e)))?;
