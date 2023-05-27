@@ -124,6 +124,13 @@ pub struct RuntimeInfo {
     pub creator: String,
     pub code: String,
     pub unique_line: bool,
+    pub position: Option<CodePosition>,
+}
+
+#[derive(WasmTypeGen, Debug)]
+pub enum CodePosition {
+    Beginning,
+    End,
 }
 
 #[derive(WasmTypeGen, Debug, Default)]
@@ -353,12 +360,31 @@ impl L0RuntimeCreator {
         let mut params = get_all_capability_params(conf, &module, &["RUNTIME"]);
         let runtime_params = params.remove("RUNTIME").unwrap();
         for (runtime_name, runtime_info) in self.runtimes.drain() {
+            let mut beginnings = vec![];
+            let mut nones = vec![];
+            let mut ends = vec![];
             for info in runtime_info.code_lines {
-                let RuntimeInfo { creator, code, unique_line } = info;
-                if !runtime_params.iter().any(|x| x.0 == *creator) {
-                    return Err(compiler_error(&format!("Module '{}' requested to use runtime {} but no RUNTIME capability was found", creator, runtime_name)));
+                let RuntimeInfo { position, .. } = &info;
+                match position {
+                    Some(CodePosition::Beginning) => {
+                        beginnings.push(info);
+                    }
+                    Some(CodePosition::End) => {
+                        ends.push(info);
+                    }
+                    None => {
+                        nones.push(info);
+                    }
                 }
-                conf.add_to_runtime(runtime_name.to_string(), runtime_info.meta.clone(), code, unique_line);
+            }
+            for position_type in [beginnings, nones, ends] {
+                for info in position_type {
+                    let RuntimeInfo { creator, code, unique_line, .. } = info;
+                    if !runtime_params.iter().any(|x| x.0 == *creator) {
+                        return Err(compiler_error(&format!("Module '{}' requested to use runtime {} but no RUNTIME capability was found", creator, runtime_name)));
+                    }
+                    conf.add_to_runtime(runtime_name.to_string(), runtime_info.meta.clone(), code, unique_line);
+                }
             }
             conf.set_runtime_data(&runtime_name, runtime_info.shared_data);
         }
@@ -627,6 +653,18 @@ impl L0RuntimeCreator {
         self.add_to_runtime_ex(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
     }
 
+    /// same as `add_to_runtime`, but your line of code is ensured to be
+    /// added to the beginning of the list of statements
+    pub fn add_to_runtime_beginning(&mut self, runtime_name: &str, code: String) {
+        self.add_to_runtime_ex_beginning(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
+    }
+
+    /// same as `add_to_runtime`, but your line of code is ensured to be
+    /// added to the end of the list of statements
+    pub fn add_to_runtime_end(&mut self, runtime_name: &str, code: String) {
+        self.add_to_runtime_ex_end(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
+    }
+
     /// same as `add_to_runtime`, but the line of code is guaranteed to be unique in the main function.
     /// use this when your module can be potentially called many times, and you wish to ensure
     /// that your entrypoint only executes this line of code once.
@@ -634,18 +672,36 @@ impl L0RuntimeCreator {
         self.add_to_runtime_ex_unique(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
     }
 
+    /// same as `add_to_runtime_unique` but the line of code is added to the beginning
+    pub fn add_to_runtime_unique_beginning(&mut self, runtime_name: &str, code: String) {
+        self.add_to_runtime_ex_unique_beginning(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
+    }
+
+/// same as `add_to_runtime_unique` but the line of code is added to the end
+    pub fn add_to_runtime_unique_end(&mut self, runtime_name: &str, code: String) {
+        self.add_to_runtime_ex_unique_end(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
+    }
+
     /// same as `add_to_runtime`, but provide metadata for how this runtime should be compiled.
     /// for example can explicitly set a profile, can change the name of the program compiling,
     /// special targets, etc.
     pub fn add_to_runtime_ex(&mut self, runtime_name: &str, code: String, meta: RuntimeMeta) {
-        self.add_to_runtime_ex_inner(runtime_name, code, meta, false)
+        self.add_to_runtime_ex_inner(runtime_name, code, meta, false, None)
     }
 
-    pub fn add_to_runtime_ex_inner(&mut self, runtime_name: &str, code: String, meta: RuntimeMeta, unique_line: bool) {
+    pub fn add_to_runtime_ex_beginning(&mut self, runtime_name: &str, code: String, meta: RuntimeMeta) {
+        self.add_to_runtime_ex_inner(runtime_name, code, meta, false, Some(CodePosition::Beginning))
+    }
+
+    pub fn add_to_runtime_ex_end(&mut self, runtime_name: &str, code: String, meta: RuntimeMeta) {
+        self.add_to_runtime_ex_inner(runtime_name, code, meta, false, Some(CodePosition::End))
+    }
+
+    pub fn add_to_runtime_ex_inner(&mut self, runtime_name: &str, code: String, meta: RuntimeMeta, unique_line: bool, position: Option<CodePosition>) {
         if let Some(existing) = self.runtimes.get_mut(runtime_name) {
-            existing.code_lines.push(RuntimeInfo { creator: self.current_module_name.to_string(), code, unique_line });
+            existing.code_lines.push(RuntimeInfo { creator: self.current_module_name.to_string(), code, unique_line, position });
         } else {
-            let code_lines = vec![RuntimeInfo { creator: self.current_module_name.to_string(), code, unique_line }];
+            let code_lines = vec![RuntimeInfo { creator: self.current_module_name.to_string(), code, unique_line, position }];
             self.runtimes.insert(runtime_name.to_string(), RuntimeData { code_lines, meta, shared_data: vec![] });
         }
     }
@@ -669,7 +725,15 @@ impl L0RuntimeCreator {
 
     /// same as `add_to_runtime_ex`, but the line of code will be unique.
     pub fn add_to_runtime_ex_unique(&mut self, runtime_name: &str, code: String, meta: RuntimeMeta) {
-        self.add_to_runtime_ex_inner(runtime_name, code, meta, true)
+        self.add_to_runtime_ex_inner(runtime_name, code, meta, true, None)
+    }
+
+    pub fn add_to_runtime_ex_unique_beginning(&mut self, runtime_name: &str, code: String, meta: RuntimeMeta) {
+        self.add_to_runtime_ex_inner(runtime_name, code, meta, true, Some(CodePosition::Beginning))
+    }
+
+    pub fn add_to_runtime_ex_unique_end(&mut self, runtime_name: &str, code: String, meta: RuntimeMeta) {
+        self.add_to_runtime_ex_inner(runtime_name, code, meta, true, Some(CodePosition::End))
     }
 }
 

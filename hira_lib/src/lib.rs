@@ -292,7 +292,7 @@ impl HiraConfig {
 #[allow(incomplete_include)]
 #[tokio::main]
 async fn main() {{
-    let runtime_data = include!("{runtime_data_include_file}");
+    let mut runtime_data = include!("{runtime_data_include_file}").iter().map(|x| x.to_string()).collect::<Vec<String>>();
     include!("{runtime_include_file}");
 }}"#).parse::<TokenStream>()
             .map_err(|e| compiler_error(&format!("Failed to output runtime {}: {:?}", runtime_name, e)))?;
@@ -903,6 +903,39 @@ pub mod e2e_tests {
         let conf = res.ok().unwrap();
         assert_eq!(conf.runtimes["hello"].2.len(), 1);
         assert_eq!(conf.runtimes["hello"].2[0], "world();");
+    }
+
+    #[test]
+    fn mod2_can_set_runtimes_with_order() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0RuntimeCreator;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[("RUNTIME", &[""])];
+                    pub fn config(input: &mut Input, l0r: &mut L0RuntimeCreator) {
+                        l0r.add_to_runtime_end("hello", "end();".to_string());
+                        l0r.add_to_runtime_beginning("hello", "begin();".to_string());
+                        l0r.add_to_runtime("hello", "middle();".to_string());
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let res = e2e_module2_run(&code,|_| {});
+        let conf = res.ok().unwrap();
+        assert_eq!(conf.runtimes["hello"].2.len(), 3);
+        assert_eq!(conf.runtimes["hello"].2[0], "begin();");
+        assert_eq!(conf.runtimes["hello"].2[1], "middle();");
+        assert_eq!(conf.runtimes["hello"].2[2], "end();");
     }
 
     #[test]
