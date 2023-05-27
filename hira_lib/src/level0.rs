@@ -116,6 +116,7 @@ pub struct L0CodeWriter {
 #[derive(WasmTypeGen, Debug, Default)]
 pub struct L0RuntimeCreator {
     current_module_name: String,
+    runtime_base_path: String,
     runtimes: std::collections::HashMap<String, RuntimeData>,
 }
 
@@ -353,7 +354,8 @@ impl L0AppendFile {
 }
 
 impl L0RuntimeCreator {
-    pub fn initialize_capabilities(&mut self, _conf: &mut HiraConfig, _module: &mut HiraModule2) -> Result<(), TokenStream> {
+    pub fn initialize_capabilities(&mut self, conf: &mut HiraConfig, _module: &mut HiraModule2) -> Result<(), TokenStream> {
+        self.runtime_base_path = conf.runtime_directory.clone();
         Ok(())
     }
     pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
@@ -642,7 +644,10 @@ impl L0Core {
 #[output_and_stringify_basic_const(RUNTIME_IMPL)]
 impl L0RuntimeCreator {
     pub fn new() -> Self {
-        Self { current_module_name: Default::default(), runtimes: Default::default() }
+        Self { current_module_name: Default::default(), runtimes: Default::default(), runtime_base_path: Default::default() }
+    }
+    pub fn get_full_runtime_path(&self, name: &str) -> String {
+        format!("{}/{}", self.runtime_base_path, name)
     }
     /// add code to the entrypoint of the runtime you define. runtime_name will become the
     /// name of an executable, and code is a line of code in the main function. Note
@@ -677,7 +682,7 @@ impl L0RuntimeCreator {
         self.add_to_runtime_ex_unique_beginning(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
     }
 
-/// same as `add_to_runtime_unique` but the line of code is added to the end
+    /// same as `add_to_runtime_unique` but the line of code is added to the end
     pub fn add_to_runtime_unique_end(&mut self, runtime_name: &str, code: String) {
         self.add_to_runtime_ex_unique_end(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
     }

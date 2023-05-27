@@ -263,7 +263,7 @@ impl HiraConfig {
                 meta.profile.as_str()
             }
         };
-        let mut cmd = format!("CARGO_WASMTYPEGEN_FILEOPS=\"0\" RUSTFLAGS=\"--cfg {runtime_name}\" {cargo} rustc \\\n    --crate-type=bin \\\n    --profile {profile} \\\n");
+        let mut cmd = format!("CARGO_WASMTYPEGEN_FILEOPS=\"0\" RUSTFLAGS=\"--cfg {runtime_name} -C strip=symbols\" {cargo} rustc \\\n    --crate-type=bin \\\n    --profile {profile} \\\n");
         let mut target_location = "".to_string();
         if !meta.target.is_empty() {
             cmd.push_str(&format!("    --target {} \\\n", meta.target));
