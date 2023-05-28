@@ -13,3 +13,4 @@ serde_json = "*"
 
 # our module depends on these other hira modules:
 aws_lambda = { path = "../level2/aws_lambda" }
+aws_cfn_stack = { path = "../level2/aws_cfn_stack" }

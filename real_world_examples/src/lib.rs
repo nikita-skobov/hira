@@ -1,9 +1,9 @@
 use hira::hira;
-use aws_lambda::aws_lambda;
+use aws_lambda::h_aws_lambda;
 
 #[hira]
 pub mod my_lambda {
-    use super::aws_lambda;
+    use super::h_aws_lambda;
 
     // the aws_lambda module
     // will generate a deployment script to compile
@@ -12,8 +12,8 @@ pub mod my_lambda {
     // here we can customize the deployment behavior, such as
     // changing the lambda function name, changing memory/timeout
     // custom roles, etc.
-    pub fn config(lambdainput: &mut aws_lambda::Input) {
-        lambdainput.memory_size = 256;
+    pub fn config(lambdainput: &mut h_aws_lambda::Input) {
+        lambdainput.extra_options.memory_size = 1024.into();
     }
 
     // when the aws_lambda module gets invoked, it looks for "lambda_main"
@@ -21,7 +21,7 @@ pub mod my_lambda {
     // it defined, and is able to deduce that we want our lambda function to be triggered
     // via Lambda Function Url. It generates cloudformation code to ensure
     // our function can be invoked via a Function Url.
-    fn lambda_main(a: aws_lambda::FunctionUrlEvent) -> String {
+    fn lambda_main(a: h_aws_lambda::FunctionUrlEvent) -> String {
         format!("You sent me:\n{}", a.body)
     }
 }
