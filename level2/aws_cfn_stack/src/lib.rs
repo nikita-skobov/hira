@@ -148,7 +148,7 @@ pub async fn create_or_update_stack(client: &aws_sdk_cloudformation::Client, nam
             .send()
             .await
         {
-            Ok(_) => todo!(),
+            Ok(_) => {},
             Err(e) => {
                 let e_str = format!("{:#?}", e);
                 if e_str.contains("No updates are to be performed") {
