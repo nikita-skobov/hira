@@ -315,6 +315,14 @@ pub mod h_aws_lambda {
         pub extra_options: lambda::function::CfnFunction,
     }
 
+    pub mod outputs {
+        /// the logical id this function has in cloudformation.
+        /// you can use this output in other modules to reference this function
+        pub const LOGICAL_FUNCTION_NAME: &str = "UNDEFINED";
+        /// the logical id of the function url resource (if created)
+        pub const LOGICAL_FUNCTION_URL_NAME: &str = "UNDEFINED";
+    }
+
     pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[
         ("RUNTIME", &[""]),
         ("CODE_WRITE", &["fn_module:service_func", "fn_module:entrypoint"]),
@@ -443,6 +451,7 @@ pub mod h_aws_lambda {
             runtime: Some(lambda::function::FunctionRuntimeEnum::Providedal2),
             ..extra_options
         };
+        l0core.set_output("LOGICAL_FUNCTION_NAME", &logical_fn_name);
 
         let resource = aws_cfn_stack::Resource {
             name: logical_fn_name.clone(),
@@ -475,7 +484,7 @@ pub mod h_aws_lambda {
             let logical_url_name = logical_url_name.replace("_", "");
             let logical_permission_name = format!("{}permission", logical_url_name);
             let url_resource = aws_cfn_stack::Resource {
-                name: logical_url_name.to_string(),
+                name: logical_url_name.clone().to_string(),
                 properties: Box::new(func_url) as _,
             };
             let permission_resource = aws_cfn_stack::Resource {
@@ -484,6 +493,7 @@ pub mod h_aws_lambda {
             };
             stackinp.resources.push(permission_resource);
             stackinp.resources.push(url_resource);
+            l0core.set_output("LOGICAL_FUNCTION_URL_NAME", &logical_url_name);
         }
     }
 }
