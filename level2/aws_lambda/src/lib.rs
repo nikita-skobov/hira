@@ -445,7 +445,7 @@ pub mod h_aws_lambda {
         };
 
         let resource = aws_cfn_stack::Resource {
-            name: logical_fn_name,
+            name: logical_fn_name.clone(),
             properties: Box::new(lambdafn) as _,
         };
         let role_resource = aws_cfn_stack::Resource {
@@ -456,6 +456,34 @@ pub mod h_aws_lambda {
         stackinp.resources.push(resource);
         if inp.role_arn.is_empty() {
             stackinp.resources.push(role_resource);
+        }
+
+        if inp.use_function_url {
+            let func_url = lambda::url::CfnUrl {
+                auth_type: lambda::url::UrlAuthTypeEnum::None,
+                target_function_arn: cfn_resources::get_att(&logical_fn_name, "Arn").unwrap(),
+                ..Default::default()
+            };
+            let func_permission = lambda::permission::CfnPermission {
+                action: "lambda:InvokeFunctionUrl".into(),
+                function_name: cfn_resources::get_att(&logical_fn_name, "Arn").unwrap(),
+                function_url_auth_type: Some(lambda::permission::PermissionFunctionUrlAuthTypeEnum::None),
+                principal: "*".into(),
+                ..Default::default()
+            };
+            let logical_url_name = format!("hiragen{user_mod_name}url");
+            let logical_url_name = logical_url_name.replace("_", "");
+            let logical_permission_name = format!("{}permission", logical_url_name);
+            let url_resource = aws_cfn_stack::Resource {
+                name: logical_url_name.to_string(),
+                properties: Box::new(func_url) as _,
+            };
+            let permission_resource = aws_cfn_stack::Resource {
+                name: logical_permission_name.to_string(),
+                properties: Box::new(func_permission) as _,
+            };
+            stackinp.resources.push(permission_resource);
+            stackinp.resources.push(url_resource);
         }
     }
 }
