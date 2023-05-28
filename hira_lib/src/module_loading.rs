@@ -79,23 +79,9 @@ pub struct HiraModule2 {
     pub is_pub: bool,
     pub input_struct_has_default: bool,
     pub input_struct: String,
-    /// List of names of fields + module names that this
-    /// module depends on. For example can be a single module
-    /// and all of its dependencies "use X::*", or can be
-    /// specific fields such as "use X::{Y, Z}". key is the name of the module,
-    /// values are the list of fields from that module. if we find
-    /// "use X::*;" and "use X::{Y, Z}", we only use the "*" import.
-    /// modules that specify "use X"
-    /// Failure to resolve a dependency results in a compilation failure
-    /// and a recommendation to use the hira compiler tool instead.
-    /// example: if X comes after this current module, then hira in proc-macro
-    /// mode cannot know anything about X, and therefore fails.
-    pub dependencies: HashMap<String, Result<Vec<String>, String>>,
-
     pub level: ModuleLevel,
 
-    /// whereas `dependencies` tracks logical dependencies, `compile_dependencies`
-    /// tracks actual dependencies required for compiling this as a wasm module.
+    /// `compile_dependencies` tracks actual dependencies to be compiled into wasm.
     /// This field is inferred based on the config function signature, not the use statements.
     /// This field is set after parsing, as it requires verification that modules exist
     pub compile_dependencies: Vec<DependencyTypeName>,
@@ -104,7 +90,6 @@ pub struct HiraModule2 {
     /// module that this module referenced in its config function
     pub lvl3_module_depends_on: Option<String>,
 
-    /// I was tempted to overload the term 'dependency' even more...
     /// These extern crates represent anytime the user added `extern crate X` to
     /// their module. These values are then used to pass the names of dependency
     /// crates that should be compiled prior to compiling the user's wasm. This enables
@@ -162,18 +147,6 @@ impl HiraModule2 {
             return Some(list);
         }
         None
-    }
-    pub fn get_dependencies(&self, s: &str) -> Option<Vec<String>> {
-        let entry = self.dependencies.get(s)?;
-        match entry {
-            // this is a renamed entry
-            Err(renamed) => {
-                self.get_dependencies(&renamed)
-            }
-            Ok(out) => {
-                Some(out.clone())
-            }
-        }
     }
 
     pub fn visit_dependencies_recursively(name: &str, conf: &HiraConfig, cb: &mut impl FnMut(&str)) {
@@ -709,10 +682,10 @@ pub fn set_dependencies_recursively(deps: &mut HashMap<String, Result<Vec<String
 
 /// TODO: how to differentiate between hira dependencies like another hira module
 /// and a normal crate/module that this module wants to use...
-pub fn set_dependencies(module: &mut HiraModule2, item: &mut syn::ItemUse) {
-    let mut deps = std::mem::take(&mut module.dependencies);
-    set_dependencies_recursively(&mut deps, &item.tree);
-    module.dependencies = deps;
+pub fn set_dependencies(_module: &mut HiraModule2, _item: &mut syn::ItemUse) {
+    // let mut deps = std::mem::take(&mut module.dependencies);
+    // set_dependencies_recursively(&mut deps, &item.tree);
+    // module.dependencies = deps;
 }
 
 pub fn set_extern_crates(module: &mut HiraModule2, item: &mut syn::ItemExternCrate) {
@@ -833,14 +806,6 @@ mod tests {
         assert_eq!(module.name, "hello_world");
         assert_eq!(module.config_fn_signature_inputs.len(), 1);
         assert_eq!(module.config_fn_signature_inputs[0], "& mut Input");
-        // println!("{:#?}", module.dependencies);
-        assert!(module.dependencies.contains_key("dependency_a"));
-        assert!(module.dependencies.contains_key("dependency_b"));
-        assert!(module.dependencies.contains_key("somedep1"));
-        assert!(module.dependencies.contains_key("xyz"));
-        assert!(module.dependencies.contains_key("somedep2"));
-        assert!(!module.dependencies.contains_key("some_library"));
-        assert_eq!(module.dependencies["somedep2"], Ok(vec!["A1".to_string(), "A2".to_string()]));
         assert!(module.input_struct.contains("pub a"));
         assert!(module.input_struct.contains("pub struct Input"));
     }

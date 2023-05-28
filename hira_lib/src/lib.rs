@@ -500,6 +500,100 @@ pub mod e2e_tests {
         assert_eq!(module.resolved_outputs["REGION"], "us-east-2");
     }
 
+    // #[test]
+    // fn mod2_outputs_can_propogate_to_other_lvl3_mods() {
+    //     let code = [
+    //         stringify!(
+    //             pub mod lvl2mod {
+    //                 use super::L0Core;
+    //                 #[derive(Default)]
+    //                 pub struct Input {
+    //                     pub region: String,
+    //                 }
+    //                 pub mod outputs {
+    //                     pub const REGION: &str = "";
+    //                 }
+    //                 pub fn config(input: &mut Input, l0core: &mut L0Core) {
+    //                     l0core.set_output("REGION", input.region.as_str());
+    //                 }
+    //             }
+    //         ),
+    //         stringify!(
+    //             pub mod mylevel3mod1 {
+    //                 use super::lvl2mod;
+    //                 pub mod outputs {
+    //                     pub use lvl2mod::outputs::*;
+    //                 }
+    //                 pub fn config(input: &mut lvl2mod::Input) {
+    //                     input.region = "us-east-2".to_string();
+    //                 }
+    //             }
+    //         ),
+    //         stringify!(
+    //             pub mod mylevel3mod2 {
+    //                 use super::mylevel3mod1;
+    //                 use super::lvl2mod;
+    //                 pub mod outputs {
+    //                     pub use mylevel3mod1::outputs::REGION;
+    //                 }
+    //                 pub fn config(input: &mut lvl2mod::Input) {
+    //                 }
+    //             }
+    //         ),
+    //     ];
+    //     let conf = e2e_module2_run(&code, |_| {}).expect("Failed to compile");
+    //     let module = conf.get_mod2("mylevel3mod1").expect("Failed to find mylevel3mod1");
+    //     assert_eq!(module.resolved_outputs["REGION"], "us-east-2");
+    //     let module = conf.get_mod2("mylevel3mod2").expect("Failed to find mylevel3mod2");
+    //     assert_eq!(module.resolved_outputs["REGION"], "us-east-2");
+    // }
+
+    // #[test]
+    // fn mod2_outputs_are_set_for_downstream_lvl3_modules() {
+    //     let code = [
+    //         stringify!(
+    //             pub mod lvl2mod {
+    //                 use super::L0Core;
+    //                 #[derive(Default)]
+    //                 pub struct Input {
+    //                     pub region: String,
+    //                 }
+    //                 pub mod outputs {
+    //                     pub const REGION: &str = "";
+    //                 }
+    //                 pub fn config(input: &mut Input, l0core: &mut L0Core) {
+    //                     l0core.set_output("REGION", input.region.as_str());
+    //                 }
+    //             }
+    //         ),
+    //         stringify!(
+    //             pub mod mylevel3mod1 {
+    //                 use super::lvl2mod;
+    //                 pub mod outputs {
+    //                     pub use lvl2mod::outputs::*;
+    //                 }
+    //                 pub fn config(input: &mut lvl2mod::Input) {
+    //                     input.region = "us-east-2".to_string();
+    //                 }
+    //             }
+    //         ),
+    //         stringify!(
+    //             pub mod mylevel3mod2 {
+    //                 use super::mylevel3mod1::outputs::REGION;
+    //                 use super::lvl2mod;
+    //                 pub fn config(input: &mut lvl2mod::Input) {
+    //                     if REGION != "us-east-2" {
+    //                         panic!("Expected region to be us east 2. Instead got {REGION}");
+    //                     }
+    //                 }
+    //             }
+    //         ),
+    //     ];
+    //     let conf = e2e_module2_run(&code, |_| {}).expect("Failed to compile");
+    //     let module = conf.get_mod2("mylevel3mod1").expect("Failed to find mylevel3mod1");
+    //     assert_eq!(module.resolved_outputs["REGION"], "us-east-2");
+    // }
+
     #[test]
     fn mod2_outputs_must_exist_if_outputted() {
         let code = [
