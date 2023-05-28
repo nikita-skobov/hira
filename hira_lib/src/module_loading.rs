@@ -5,6 +5,7 @@ use serde::{Serialize, Deserialize};
 
 use proc_macro2::TokenStream;
 use quote::{ToTokens};
+use wasm_type_gen::WasmIncludeString;
 
 use crate::parsing::{remove_surrounding_quotes, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples, is_public, has_derive};
 use crate::{wasm_types::*, level0::*};
@@ -276,6 +277,53 @@ impl HiraModule2 {
         Ok(())
     }
 
+    pub fn use_dep_is_in_compile_dependencies(&self, use_dep: &str) -> bool {
+        for compile_dep in self.compile_dependencies.iter() {
+            match compile_dep {
+                DependencyTypeName::Mod1Or2(dep) |
+                DependencyTypeName::Library(dep) => {
+                    if dep == use_dep {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// we restrict use statements to only be valid for:
+    /// - L0 modules and associated helpers,
+    /// - L2 modules that this module depends on (ie: params that are in its config signature)
+    /// - are from extern crates
+    pub fn verify_use_dependencies(&mut self) -> Result<(), TokenStream> {
+        let include_str = LibraryObj::include_in_rs_wasm();
+        let include_str_has = |s: &str| -> bool {
+            let check1 = format!("pub struct {s}");
+            let check2 = format!("pub enum {s}");
+            if include_str.contains(&check1) || include_str.contains(&check2) {
+                return true;
+            }
+            false
+        };
+        for use_dep in self.use_dependencies.iter() {
+            if self.use_dep_is_in_compile_dependencies(use_dep) {
+                continue;
+            }
+            // check if its referencing something from an extern crate.
+            if self.extern_crates.contains(use_dep) {
+                continue;
+            }
+            // finally, check if its some helper in the include string
+            if include_str_has(&use_dep) {
+                continue;
+            }
+            return Err(compiler_error(
+                &format!("Module {} has a use statement that's referencing '{}' but this item will not be compiled, and therefore the wasm build will fail. hira modules can only have use statements on modules that are part of its config signature (example: referencing other modules, using Level0 functionality + helper items) as well as external crates. If '{}' is an external crate, make sure to first add an `extern crate {};` to the top of your hira module.", self.name, use_dep, use_dep, use_dep)
+            ))
+        }
+        Ok(())
+    }
+
     pub fn verify_config_signature(&mut self, conf: &mut HiraConfig) -> Result<(), TokenStream> {
         for s in self.config_fn_signature_inputs.iter() {
             if s == "& mut Input" {
@@ -387,6 +435,10 @@ impl HiraModule2 {
                 &format!("Config function in module {} is not public. Ensure your config function starts with `pub fn config(...)`", self.name)
             ));
         }
+        // verify use statements are valid to ensure
+        // that the user doesnt get an annoying compilation error on build.
+        // we can provide a nicer error message that explains what they're doing wrong.
+        self.verify_use_dependencies()?;
 
         if self.level == ModuleLevel::Level3 {
             self.assert_level_3_and_set_depends_on()?;
@@ -891,6 +943,31 @@ mod tests {
         let mut conf = HiraConfig::default();
         let out = module.verify_config_signature(&mut conf);
         assert!(out.is_ok());
+    }
+
+    #[test]
+    fn mod2_gives_nice_error_if_use_statements_are_wrong() {
+        let code = r#"
+        pub mod hello_world {
+            use super::thing_that_wont_be_compiled;
+            #[derive(Default)]
+            pub struct Input {
+                pub a: u32,
+            }
+            mod outputs {
+                pub const HEY: &'static str = "dsa";
+            }
+            pub fn config(input: &mut Input) {
+                thing_that_wont_be_compiled::hi();
+            }
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        let err = out.err().expect("Expected to get an error from verify");
+        assert_contains_str(err.to_string(), "has a use statement that's referencing 'thing_that_wont_be_compiled' but this item will not be compiled");
     }
 
     #[test]
