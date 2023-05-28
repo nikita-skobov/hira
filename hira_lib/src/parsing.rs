@@ -145,6 +145,24 @@ pub fn parse_module_name_from_use_tree(names: &[String]) -> Option<(&String, Opt
     Some((mod_name, Some(last)))
 }
 
+/// given a path like `self::some_module::outputs`
+/// return the name of the first real module name (excluding self, crate, super)
+/// and a slice of all the names afterwards
+pub fn parse_module_name_from_use_names(names: &[String]) -> Option<(&String, &[String])> {
+    for (i, name) in names.iter().enumerate() {
+        if name != "self" && name != "crate" && name != "super" {
+            let next_index = i + 1;
+            let slice = if next_index >= names.len() {
+                &[]
+            } else {
+                &names[next_index..]
+            };
+            return Some((name, slice));
+        }
+    }
+    None
+}
+
 /// callback takes 3 args:
 /// - list of all paths into the use tree in order left to right.
 /// - option of if this is a renamed item

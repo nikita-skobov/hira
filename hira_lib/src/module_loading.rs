@@ -7,7 +7,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens};
 use wasm_type_gen::WasmIncludeString;
 
-use crate::parsing::{remove_surrounding_quotes, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples, is_public, has_derive};
+use crate::parsing::{remove_surrounding_quotes, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples, is_public, has_derive, parse_module_name_from_use_names};
 use crate::{wasm_types::*, level0::*};
 
 
@@ -81,6 +81,11 @@ pub struct HiraModule2 {
     pub input_struct_has_default: bool,
     pub input_struct: String,
     pub level: ModuleLevel,
+    pub errors_during_parsing: Vec<String>,
+
+    /// during parsing we detect which outputs this module has in its use statements.
+    /// prior to compiling, we fill in these outputs into the wasm code.
+    pub fill_outputs: Vec<OutputType>,
 
     /// we track all of the use statements that this module has.
     /// the main purpose of this is to give nice errors to the user if they
@@ -291,6 +296,109 @@ impl HiraModule2 {
         false
     }
 
+    pub fn insert_evaluated_output_const(contents: &mut String, mod_name: &str, key: &String, val: &String) {
+        // this is hacky as we search for a string, but converting back to tokens and back again
+        // seems expensive.
+        // we know the module name, so we just search for the string `mod {mod_name} {`
+        // and add our const item right after.
+        let search_str = format!("mod {mod_name} {{");
+        let replaced = format!("{search_str}\nconst {key}: &str = r#\"{val}\"#;");
+        let new = contents.replace(&search_str, &replaced);
+        *contents = new;
+    }
+
+    /// this should only be called for lvl3 modules.
+    /// prior to compilation, we add in `const {OUTPUT_NAME}: &str = {OUTPUT_VAL};`
+    /// for each output that this lvl3 module depends on
+    pub fn insert_evaluated_outputs(&mut self, conf: &HiraConfig) -> Result<(), TokenStream> {
+        for output in self.fill_outputs.iter() {
+            match output {
+                OutputType::AllFromModule(mod_name) => {
+                    // iterate over every output that that module has
+                    // and insert into contents.
+                    if let Some(mod_conf) = conf.get_mod2(&mod_name) {
+                        // there are static outputs and evaluated outputs. we first fill
+                        // all the static ones, and then iterate over the evaluated ones and overwrite
+                        // any that have changed.
+                        let mut final_outputs = HashMap::new();
+                        for output in mod_conf.outputs.iter() {
+                            match output {
+                                // TODO: should recurse or not?
+                                // OutputType::AllFromModule(_) => todo!(),
+                                // OutputType::SpecificFromModule(_, _) => todo!(),
+                                OutputType::SpecificConst(key, val) => {
+                                    final_outputs.insert(key, val);
+                                }
+                                _ => {}
+                            }
+                        }
+                        for (key, val) in mod_conf.resolved_outputs.iter() {
+                            final_outputs.insert(key, val);
+                        }
+                        for (key, val) in final_outputs {
+                            let my_contents = &mut self.contents;
+                            Self::insert_evaluated_output_const(my_contents, &self.name, key, val);
+                        }
+                    } else {
+                        // this is an error because it means
+                        // a lvl3 module tried to reference an output of something that doesnt exist yet.
+                        // this could happen if the dependency module is below this current module.
+                        // that can happen when compiling with cargo normally, but ideally in the future
+                        // we add a CLI that can avoid this case, and properly create a dependency graph.
+                        return Err(compiler_error(
+                            &format!("Module '{}' referenced outputs from dependency module '{}', but that module has not been loaded yet. If compiling with cargo, ensure that '{}' is defined prior to '{}'", self.name, mod_name, mod_name, self.name)
+                        ));
+                    }
+                }
+                OutputType::SpecificFromModule(mod_name, specific_key) => {
+                    if let Some(mod_conf) = conf.get_mod2(&mod_name) {
+                        let mut final_outputs = HashMap::new();
+                        for output in mod_conf.outputs.iter() {
+                            match output {
+                                // TODO: should recurse or not?
+                                // OutputType::AllFromModule(_) => todo!(),
+                                // OutputType::SpecificFromModule(_, _) => todo!(),
+                                OutputType::SpecificConst(key, val) => {
+                                    if key == specific_key {
+                                        final_outputs.insert(key, val);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        for (key, val) in mod_conf.resolved_outputs.iter() {
+                            if key == specific_key {
+                                final_outputs.insert(key, val);
+                            }
+                        }
+                        // if its empty, it means we failed to find that output, we should error, as
+                        // compilation further will fail.
+                        if final_outputs.is_empty() {
+                            return Err(compiler_error(
+                                &format!("Module '{}' referenced output '{}' from dependency module '{}', but the dependency module has not loaded this value yet", self.name, specific_key, mod_name)
+                            ));
+                        }
+                        for (key, val) in final_outputs {
+                            let my_contents = &mut self.contents;
+                            Self::insert_evaluated_output_const(my_contents, &self.name, key, val);
+                        }
+                    } else {
+                        // this is an error because it means
+                        // a lvl3 module tried to reference an output of something that doesnt exist yet.
+                        // this could happen if the dependency module is below this current module.
+                        // that can happen when compiling with cargo normally, but ideally in the future
+                        // we add a CLI that can avoid this case, and properly create a dependency graph.
+                        return Err(compiler_error(
+                            &format!("Module '{}' referenced outputs from dependency module '{}', but that module has not been loaded yet. If compiling with cargo, ensure that '{}' is defined prior to '{}'", self.name, mod_name, mod_name, self.name)
+                        ));
+                    }
+                }
+                OutputType::SpecificConst(_, _) => unreachable!("lvl3 modules cannot depent on specific const output types"),
+            }
+        }
+        Ok(())
+    }
+
     /// we restrict use statements to only be valid for:
     /// - L0 modules and associated helpers,
     /// - L2 modules that this module depends on (ie: params that are in its config signature)
@@ -325,6 +433,11 @@ impl HiraModule2 {
     }
 
     pub fn verify_config_signature(&mut self, conf: &mut HiraConfig) -> Result<(), TokenStream> {
+        if let Some(first_err) = self.errors_during_parsing.first() {
+            return Err(compiler_error(
+                &format!("Error during parsing module '{}'\n{}", self.name, first_err)
+            ));
+        }
         for s in self.config_fn_signature_inputs.iter() {
             if s == "& mut Input" {
                 continue;
@@ -586,6 +699,7 @@ pub fn hira_mod2_inner(conf: &mut HiraConfig, mut stream: TokenStream) -> Result
         return Ok(stream);
     }
 
+    module.insert_evaluated_outputs(conf)?;
     let codes = get_wasm_code_to_compile2(conf, &module)?;
     let extern_dependencies = get_all_extern_crates(conf, &mut module);
     let mut pass_this = LibraryObj::new();
@@ -674,89 +788,77 @@ pub fn check_for_default_impl(module: &mut HiraModule2, item: &mut syn::ItemImpl
     }
 }
 
-pub fn set_dep_inner(deps: &mut HashMap<String, Result<Vec<String>, String>>, dep_name: &String, field: String) {
-    match deps.get_mut(dep_name) {
-        Some(Ok(existing_vec)) => {
-            match (existing_vec.contains(&"*".to_string()), field == "*") {
-                // the existing vec is already just *, so ignore
-                (true, true) => {},
-                // existing vec is already *, but we want to add
-                // something that isn't *. ignore, because * overrides everything else
-                (true, false) => {},
-                // we want to set existing vec to * and override existing entries
-                (false, true) => {
-                    existing_vec.clear();
-                    existing_vec.push(field);
-                }
-                // not using wildcards, just push
-                (false, false) => {
-                    existing_vec.push(field);
-                }
-            }
-        }
-        None => {
-            deps.insert(dep_name.to_string(), Ok(vec![field]));
-        }
-        // should not be possible
-        _ => {}
-    }
-}
-
-pub fn set_dep(deps: &mut HashMap<String, Result<Vec<String>, String>>, dep_name: &String, renamed: &String, field: String) {
-    if dep_name != renamed {
-        deps.insert(renamed.to_string(), Err(dep_name.to_string()));
-    }
-    set_dep_inner(deps, dep_name, field);
-}
-
-// pub fn set_dependencies_recursively(deps: &mut HashMap<String, Result<Vec<String>, String>>, tree: &syn::UseTree) {
-//     let mut past_names = vec![];
-//     iterate_item_tree(&mut past_names, tree, &mut |names, renamed, wildcard| {
-//         // first, find the actual module name
-//         let (mod_name, specific_import) = match parse_module_name_from_use_tree(names) {
-//             Some(a) => a,
-//             None => return,
-//         };
-//         // if the last part is a wildcard, then we want all imports.
-//         // also: if there is no specific import, this means the last component
-//         // is "outputs", and then we also want to use a wildcard
-//         let last_part = match (wildcard, specific_import) {
-//             (true, _) => "*".to_string(),
-//             (false, None) => "*".to_string(),
-//             (false, Some(x)) => x.to_string(),
-//         };
-
-//         // dont allow "use X::outputs::something as abc"
-//         // renaming only allowed for "use X::outputs as x_outputs"
-//         if last_part != "*" && renamed.is_some() {
-//             return;
-//         }
-//         let renamed = match renamed {
-//             Some(x) => x,
-//             None => mod_name.to_string()
-//         };
-//         set_dep(deps, mod_name, &renamed, last_part);
-//     });
-// }
-
-pub fn set_use_dependencies_recursively(deps: &mut HashSet<String>, tree: &syn::UseTree) {
+pub fn set_use_dependencies_recursively(deps: &mut HashSet<String>, has_outputs: &mut Vec<OutputType>, errors: &mut Vec<String>, tree: &syn::UseTree) {
     let mut past_names = vec![];
-    iterate_item_tree(&mut past_names, tree, &mut |names, _renamed, _wildcard| {
-        // get first real module name besides "self", "crate", or "super"
-        for name in names {
-            if name != "self" && name != "crate" && name != "super" {
-                deps.insert(name.to_string());
-                break;
+    iterate_item_tree(&mut past_names, tree, &mut |names, _renamed, wildcard| {
+        // split the names to get the first module name (excluding self, crate, super)
+        // and the rest of the names afterwards
+        let (module_name, after) = if let Some(x) = parse_module_name_from_use_names(names) {
+            x
+        } else {
+            return
+        };
+
+        // check if the word immediately after the module name is "outputs".
+        // if so, treat it specially.
+        if let Some(first) = after.first() {
+            if first != "outputs" {
+                deps.insert(module_name.to_string());
+                return;
             }
+            // if it's just `use x::outputs` without any specific output, or wildcard
+            // then we error, since later on we wont be able to substitute specific outputs
+            if after.len() == 1 {
+                if !wildcard {
+                    errors.push(format!("Detected use statement that ends in `::outputs`. This is invalid because hira won't be able to subtitute the evaluated output values. Please change this to end with a specific output name such as `use {}::outputs::SPECIFIC;` or a wildcard `use {}::outputs::*;`", module_name, module_name));
+                    return;
+                }
+                // otherwise its a wildcard:
+                has_outputs.push(OutputType::AllFromModule(module_name.to_string()));
+                return;
+            }
+            // if the len is more than 1, then we assert that the length is 2.
+            // because otherwise we have something like `use x::outputs::something::else` which is invalid.
+            // inside outputs there can only be 1 level of items.
+            if after.len() != 2 {
+                errors.push(format!("Detected use statement that has outputs with more than 1 item after `{}::outputs::...`. This is invalid as hira only allows 1 level of outputs. Ensure your use outputs statement looks like `use {}::outputs::ONLY_ONE_ITEM_HERE;`", module_name, module_name));
+                return;
+            }
+            if let Some(output_item_name) = after.get(1) {
+                has_outputs.push(OutputType::SpecificFromModule(module_name.to_string(), output_item_name.to_string()));
+                return;
+            }
+        } else {
+            // not special, just add it to deps
+            deps.insert(module_name.to_string());
         }
     });
 }
 
-/// TODO: how to differentiate between hira dependencies like another hira module
-/// and a normal crate/module that this module wants to use...
 pub fn set_use_dependencies(module: &mut HiraModule2, item: &mut syn::ItemUse) {
     let mut deps = std::mem::take(&mut module.use_dependencies);
-    set_use_dependencies_recursively(&mut deps, &item.tree);
+    let mut outputs = vec![];
+    set_use_dependencies_recursively(&mut deps, &mut outputs, &mut module.errors_during_parsing, &item.tree);
+    // a single use item cannot have both outputs and non-output use statements.
+    // for eg, this is invalid:
+    // use some_module::{
+    //    outputs::*,
+    //    other_stuff,
+    // }
+    // because if we detect outputs, we must be able to remove the item entirely, and
+    // if there's a group, we remove their other_stuff.
+    if !outputs.is_empty() && !deps.is_empty() {
+        module.errors_during_parsing.push(format!("Detected both outputs and non-outputs in a single use statement:\n{}\nHira requires that any use statement with `::outputs` is on its own separate use statement. Please separate these.", item.to_token_stream().to_string()));
+    }
+    if !outputs.is_empty() {
+        // we detected an output, remove the item entirely
+        // as we will replace the use item with specific constants
+        // during wasm compilation
+        let replacement = "use {};".parse::<TokenStream>().unwrap();
+        let replacement_item = syn::parse2::<syn::ItemUse>(replacement).unwrap();
+        *item = replacement_item;
+    }
+    module.fill_outputs = outputs;
     module.use_dependencies = deps;
 }
 
@@ -941,6 +1043,148 @@ mod tests {
         let mut conf = HiraConfig::default();
         let out = module.verify_config_signature(&mut conf);
         assert!(out.is_ok());
+    }
+
+    #[test]
+    fn mod2_cannot_use_outputs_without_specificity() {
+        let code = r#"
+        pub mod hello_world {
+            use super::other_module::outputs;
+            #[derive(Default)]
+            pub struct Input {
+                pub a: u32,
+            }
+            mod outputs {
+                pub const HEY: &'static str = "dsa";
+            }
+            pub fn config(input: &mut Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        let err = out.err().expect("Expected to get verify error");
+        assert_contains_str(err.to_string(), "Detected use statement that ends in `::outputs`. This is invalid");
+    }
+
+    #[test]
+    fn mod2_outputs_with_wildcard_works() {
+        let code = r#"
+        pub mod hello_world {
+            use super::other_module::outputs::*;
+            #[derive(Default)]
+            pub struct Input {
+                pub a: u32,
+            }
+            mod outputs {
+                pub const HEY: &'static str = "dsa";
+            }
+            pub fn config(input: &mut Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        assert!(out.is_ok());
+    }
+
+    #[test]
+    fn mod2_cannot_have_use_with_outputs_and_non_outputs() {
+        let code = r#"
+        pub mod hello_world {
+            use super::{
+                other_module,
+                another_one::outputs::*,
+            };
+            #[derive(Default)]
+            pub struct Input {
+                pub a: u32,
+            }
+            mod outputs {
+                pub const HEY: &'static str = "dsa";
+            }
+            pub fn config(input: &mut Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        let err = out.err().expect("Expected a verification error");
+        assert_contains_str(err.to_string(), "Detected both outputs and non-outputs in a single use statement")
+    }
+
+    #[test]
+    fn mod2_valid_output_gets_replaced() {
+        let code = r#"
+        pub mod hello_world {
+            use super::some_module::outputs::THING;
+            #[derive(Default)]
+            pub struct Input {
+                pub a: u32,
+            }
+            mod outputs {
+                pub const HEY: &'static str = "dsa";
+            }
+            pub fn config(input: &mut Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        assert!(out.is_ok());
+        // this is what it would look like if it was still in, and we removed all spaces:
+        assert!(!module.contents.replace(" ", "").contains("usesuper::some_module::outputs::THING"));
+        // but we do expect to see it replaced with use {};
+        assert!(module.contents.replace(" ", "").contains("use{};"));
+        assert_eq!(module.fill_outputs.len(), 1);
+        assert_eq!(module.fill_outputs[0], OutputType::SpecificFromModule("some_module".to_string(), "THING".to_string()));
+        let mut some_module = HiraModule2::default();
+        some_module.outputs.push(OutputType::SpecificConst("THING".to_string(), "hello".to_string()));
+        conf.modules2.insert("some_module".to_string(), some_module);
+        let out = module.insert_evaluated_outputs(&conf);
+        assert!(out.is_ok());
+        assert_contains_str(module.contents, "const THING: &str = r#\"hello\"#;");
+    }
+
+    #[test]
+    fn mod2_valid_output_gets_replaced_wildcard() {
+        let code = r#"
+        pub mod hello_world {
+            use super::some_module::outputs::*;
+            #[derive(Default)]
+            pub struct Input {
+                pub a: u32,
+            }
+            mod outputs {
+                pub const HEY: &'static str = "dsa";
+            }
+            pub fn config(input: &mut Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        assert!(out.is_ok());
+        // this is what it would look like if it was still in, and we removed all spaces:
+        assert!(!module.contents.replace(" ", "").contains("usesuper::some_module::outputs"));
+        // but we do expect to see it replaced with use {};
+        assert!(module.contents.replace(" ", "").contains("use{};"));
+        assert_eq!(module.fill_outputs.len(), 1);
+        assert_eq!(module.fill_outputs[0], OutputType::AllFromModule("some_module".to_string()));
+        let mut some_module = HiraModule2::default();
+        some_module.outputs.push(OutputType::SpecificConst("THING".to_string(), "hello".to_string()));
+        some_module.outputs.push(OutputType::SpecificConst("OVERRIDE".to_string(), "a".to_string()));
+        some_module.resolved_outputs.insert("OVERRIDE".to_string(), "b".to_string());
+        conf.modules2.insert("some_module".to_string(), some_module);
+        let out = module.insert_evaluated_outputs(&conf);
+        assert!(out.is_ok());
+        assert_contains_str(&module.contents, "const THING: &str = r#\"hello\"#;");
+        assert_contains_str(&module.contents, "const OVERRIDE: &str = r#\"b\"#;");
     }
 
     #[test]
