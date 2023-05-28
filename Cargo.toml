@@ -5,6 +5,7 @@ members = [
     "real_world_examples",
     "level2/aws_lambda",
     "level2/aws_cfn_stack",
+    "level2/aws_cloudfront_distribution",
 ]
 
 # compile dependencies in release mode
