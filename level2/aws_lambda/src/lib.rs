@@ -198,6 +198,7 @@ pub mod h_aws_lambda {
     use super::RuntimeMeta;
     use self::cfn_resources::ToOptStrVal;
     use self::cfn_resources::serde_json::Value;
+    use self::cfn_resources::StrVal;
 
     pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -444,7 +445,7 @@ pub mod h_aws_lambda {
             },
             handler: Some("index.handler".into()),
             role: if inp.role_arn.is_empty() {
-                cfn_resources::get_att(&logical_role_name, "Arn").unwrap()
+                StrVal::Val(cfn_resources::get_att(&logical_role_name, "Arn"))
             } else {
                 inp.role_arn.clone().into()
             },
@@ -470,12 +471,12 @@ pub mod h_aws_lambda {
         if inp.use_function_url {
             let func_url = lambda::url::CfnUrl {
                 auth_type: lambda::url::UrlAuthTypeEnum::None,
-                target_function_arn: cfn_resources::get_att(&logical_fn_name, "Arn").unwrap(),
+                target_function_arn: StrVal::Val(cfn_resources::get_att(&logical_fn_name, "Arn")),
                 ..Default::default()
             };
             let func_permission = lambda::permission::CfnPermission {
                 action: "lambda:InvokeFunctionUrl".into(),
-                function_name: cfn_resources::get_att(&logical_fn_name, "Arn").unwrap(),
+                function_name: StrVal::Val(cfn_resources::get_att(&logical_fn_name, "Arn")),
                 function_url_auth_type: Some(lambda::permission::PermissionFunctionUrlAuthTypeEnum::None),
                 principal: "*".into(),
                 ..Default::default()
