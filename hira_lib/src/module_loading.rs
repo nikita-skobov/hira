@@ -386,12 +386,19 @@ impl HiraModule2 {
                     &format!("Detected module {} as {:?}, but its config function signature does not reference its own Input struct. All Level2 modules must reference their Self Input in their config function signatures. Eg: `pub fn config(&mut Input)`", self.name, self.level)
                 ));
             }
+            if !self.is_pub {
+                return Err(compiler_error(
+                    &format!("Detected module {} as {:?}, but it is not marked public. Level2 modules must be public", self.name, self.level)
+                ));
+            }
         }
 
-        if self.level != ModuleLevel::Level3 && !self.is_pub {
-            return Err(compiler_error(
-                &format!("Detected module {} as {:?}, but it is not marked public. Level2 modules must be public", self.name, self.level)
-            ));
+        if self.level == ModuleLevel::Level3 {
+            if !self.input_struct.is_empty() {
+                return Err(compiler_error(
+                    &format!("Detected module {} as {:?}, but it has an input struct. Level3 modules cannot have an input struct", self.name, self.level)
+                ));
+            }
         }
 
         // config function must be public
@@ -409,12 +416,6 @@ impl HiraModule2 {
         // TODO: add capability checks, eg: module level2s arent allowed to use outputs,
         // module level3s are only allowed to have 1 input param,
         // module level1s cannot depend on level2s, etc.
-
-        // TODO:
-        // add check for input struct,
-        // ensure level3 does not have one.
-        // ensure other levels DO have one, and ensure it has a Default method
-        // scan its attributes for (Derive(Default)), impl w/ a default() signature, etc.
 
         // verify the shape of outputs is valid:
         if !self.outputs.is_empty() {
@@ -1027,6 +1028,24 @@ mod tests {
         let mut conf = HiraConfig::default();
         let _ = module.verify_config_signature(&mut conf);
         assert_eq!(module.level, ModuleLevel::Level3);
+    }
+
+    #[test]
+    fn mod2_lvl3_cannot_have_input_struct() {
+        let code = r#"
+        pub mod hello_world {
+            pub struct Input {}
+            // this implies it is a lvl3 module
+            pub fn config(input: &mut other_module::Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        assert_eq!(module.level, ModuleLevel::Level3);
+        let err = out.err().expect("Expected an error from verify fn");
+        assert_contains_str(err.to_string(), "Level3 modules cannot have an input struct")
     }
 
     #[test]
