@@ -344,7 +344,7 @@ pub mod aws_cfn_stack {
         for code in input.run_before.iter() {
             runtimer.add_to_runtime_unique_beginning("deployer", code.to_string());
         }
-        runtimer.add_to_runtime_unique_end("deployer", "aws_cfn_stack::runtime_main(&runtime_data).await".to_string());
+        runtimer.add_to_runtime_unique_end("deployer", "::aws_cfn_stack::runtime_main(&runtime_data).await".to_string());
         runtimer.add_data_to_runtime("deployer", output);
     }
 }
