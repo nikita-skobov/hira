@@ -57,8 +57,9 @@ pub enum OutputType {
     ///     use some_lvlv2::outputs::{A, B, C};
     /// }
     /// ```
-    /// in this case we specify (some_lvl2, A), (some_lvl2, B), (some_lvl2, C)
-    SpecificFromModule(String, String),
+    /// in this case we specify (some_lvl2, A, None), (some_lvl2, B, None), (some_lvl2, C, None)
+    /// The last field is only Some() if the user renames a specific output
+    SpecificFromModule(String, String, Option<String>),
     /// corresponds to doing:
     /// ```rust,ignore
     /// mod outputs {
@@ -206,10 +207,9 @@ impl HiraModule2 {
                         }
                     }
                 }
-                OutputType::SpecificFromModule(_, new_key) => {
+                OutputType::SpecificFromModule(_, new_key, _) => {
                     if new_key == k { return true }
                 }
-                
             }
         }
         false
@@ -361,7 +361,7 @@ impl HiraModule2 {
                         ));
                     }
                 }
-                OutputType::SpecificFromModule(mod_name, specific_key) => {
+                OutputType::SpecificFromModule(mod_name, specific_key, renamed) => {
                     if let Some(mod_conf) = conf.get_mod2(&mod_name) {
                         let mut final_outputs = HashMap::new();
                         for output in mod_conf.outputs.iter() {
@@ -391,7 +391,11 @@ impl HiraModule2 {
                         }
                         for (key, val) in final_outputs {
                             let my_contents = &mut self.contents;
-                            Self::insert_evaluated_output_const(my_contents, &self.name, key, val);
+                            if let Some(renamed) = renamed {
+                                Self::insert_evaluated_output_const(my_contents, &self.name, renamed, val);
+                            } else {
+                                Self::insert_evaluated_output_const(my_contents, &self.name, key, val);
+                            }
                         }
                     } else {
                         // this is an error because it means
@@ -589,7 +593,7 @@ impl HiraModule2 {
                             OutputType::SpecificConst(_, _) => {
                                 return Err(compiler_error(&format!("Detected module {} as {:?}, but in its `mod outputs` section there are const statements. Only Level2 modules can specify const statements in its outputs section", self.name, self.level)));
                             }
-                            OutputType::AllFromModule(mod_name) | OutputType::SpecificFromModule(mod_name, _) => {
+                            OutputType::AllFromModule(mod_name) | OutputType::SpecificFromModule(mod_name, _, _) => {
                                 if mod_name != l2_dependency {
                                     return Err(compiler_error(&format!("Detected module {} as {:?}. Its `mod outputs` section contains use statements from other modules. Expected to only see use statements from Level2 module {}, but found {}. Level3 modules can only specify outputs that exist in the corresponding Level2 module", self.name, self.level, l2_dependency, mod_name)));
                                 }
@@ -801,7 +805,7 @@ pub fn check_for_default_impl(module: &mut HiraModule2, item: &mut syn::ItemImpl
 
 pub fn set_use_dependencies_recursively(deps: &mut HashSet<String>, has_outputs: &mut Vec<OutputType>, errors: &mut Vec<String>, tree: &syn::UseTree) {
     let mut past_names = vec![];
-    iterate_item_tree(&mut past_names, tree, &mut |names, _renamed, wildcard| {
+    iterate_item_tree(&mut past_names, tree, &mut |names, renamed, wildcard| {
         // split the names to get the first module name (excluding self, crate, super)
         // and the rest of the names afterwards
         let (module_name, after) = if let Some(x) = parse_module_name_from_use_names(names) {
@@ -836,7 +840,7 @@ pub fn set_use_dependencies_recursively(deps: &mut HashSet<String>, has_outputs:
                 return;
             }
             if let Some(output_item_name) = after.get(1) {
-                has_outputs.push(OutputType::SpecificFromModule(module_name.to_string(), output_item_name.to_string()));
+                has_outputs.push(OutputType::SpecificFromModule(module_name.to_string(), output_item_name.to_string(), renamed));
                 return;
             }
         } else {
@@ -901,7 +905,7 @@ pub fn set_outputs(module: &mut HiraModule2, item: &mut syn::ItemMod) {
         }
         if let syn::Item::Use(u) = item {
             let mut names = vec![];
-            iterate_item_tree(&mut names, &u.tree, &mut |paths, _, wildcard| {
+            iterate_item_tree(&mut names, &u.tree, &mut |paths, renamed, wildcard| {
                 let (mod_name, specific_import) = match parse_module_name_from_use_tree(paths) {
                     Some(x) => x,
                     None => return,
@@ -915,7 +919,7 @@ pub fn set_outputs(module: &mut HiraModule2, item: &mut syn::ItemMod) {
                         // this shouldnt be allowed in this context. so we just ignore it.
                     }
                     (false, Some(specific)) => {
-                        module.outputs.push(OutputType::SpecificFromModule(mod_name.to_string(), specific.to_string()));
+                        module.outputs.push(OutputType::SpecificFromModule(mod_name.to_string(), specific.to_string(), renamed));
                     }
                 }
             });
@@ -1147,7 +1151,7 @@ mod tests {
         // but we do expect to see it replaced with use {};
         assert!(module.contents.replace(" ", "").contains("use{};"));
         assert_eq!(module.fill_outputs.len(), 1);
-        assert_eq!(module.fill_outputs[0], OutputType::SpecificFromModule("some_module".to_string(), "THING".to_string()));
+        assert_eq!(module.fill_outputs[0], OutputType::SpecificFromModule("some_module".to_string(), "THING".to_string(), None));
         let mut some_module = HiraModule2::default();
         some_module.outputs.push(OutputType::SpecificConst("THING".to_string(), "hello".to_string()));
         conf.modules2.insert("some_module".to_string(), some_module);
@@ -1511,7 +1515,7 @@ mod tests {
         "#;
         let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
         let module = parse_module_from_stream(stream).expect("failed to parse test case as module");
-        assert_eq!(module.outputs[0], OutputType::SpecificFromModule("something".to_string(), "specific".to_string()));
+        assert_eq!(module.outputs[0], OutputType::SpecificFromModule("something".to_string(), "specific".to_string(), None));
         assert_eq!(module.outputs[1], OutputType::AllFromModule("apples".to_string()));
         assert_eq!(module.outputs[2], OutputType::SpecificConst("HELLO".to_string(), "dsa".to_string()));
     }

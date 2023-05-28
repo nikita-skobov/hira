@@ -424,7 +424,7 @@ impl L0Core {
                             }
                         }
                     }
-                    OutputType::SpecificFromModule(mod_name, key) => {
+                    OutputType::SpecificFromModule(mod_name, key, _) => {
                         self.set_defaults_recursively(conf, mod_name);
                         if let Some(mod_outputs) = self.module_outputs.get(mod_name) {
                             if let Some(val) = mod_outputs.get(key) {
@@ -495,7 +495,7 @@ impl L0Core {
                     self.drain_outputs_into(&other_module_name, &mut module.resolved_outputs);
                     break;
                 }
-                crate::module_loading::OutputType::SpecificFromModule(other_module_name, key) => {
+                crate::module_loading::OutputType::SpecificFromModule(other_module_name, key, _) => {
                     if let Some(val) = self.remove_specific_output(other_module_name, key) {
                         module.resolved_outputs.insert(key.to_string(), val);
                     }

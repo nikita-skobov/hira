@@ -584,6 +584,52 @@ pub mod e2e_tests {
         let _ = e2e_module2_run(&code, |_| {}).expect("Failed to compile");
     }
 
+
+    #[test]
+    fn mod2_individual_outputs_can_be_renamed() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0Core;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub region: String,
+                    }
+                    pub mod outputs {
+                        pub const REGION: &str = "dsa";
+                    }
+                    pub fn config(input: &mut Input, l0core: &mut L0Core) {
+                        l0core.set_output("REGION", input.region.as_str());
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod1 {
+                    use super::lvl2mod;
+                    pub mod outputs {
+                        pub use lvl2mod::outputs::*;
+                    }
+                    pub fn config(input: &mut lvl2mod::Input) {
+                        input.region = "us-east-2".to_string();
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod2 {
+                    use super::mylevel3mod1::outputs::REGION as LVL3MOD1REGION;
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {
+                        if LVL3MOD1REGION != "us-east-2" {
+                            panic!("Expected region to be us east 2. Instead got {REGION}");
+                        }
+                    }
+                }
+            ),
+        ];
+        let _ = e2e_module2_run(&code, |_| {}).expect("Failed to compile");
+    }
+
+
     #[test]
     fn mod2_outputs_must_exist_if_outputted() {
         let code = [
