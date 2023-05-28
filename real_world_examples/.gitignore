@@ -1,6 +1,7 @@
 hira/wasm_out
 hira/generated
 hira/runtimes
+hira/cached_modules
 # in an actual realworld program you might want to commit build.sh
 # so you can diff it. in this example i am omitting it because this example
 # is intended to change often, so it is not useful to commit it.
