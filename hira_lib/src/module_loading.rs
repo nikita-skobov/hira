@@ -81,6 +81,13 @@ pub struct HiraModule2 {
     pub input_struct: String,
     pub level: ModuleLevel,
 
+    /// we track all of the use statements that this module has.
+    /// the main purpose of this is to give nice errors to the user if they
+    /// try to use something that isnt referenced by their config function.
+    /// Remember: only fields that are referenced in the config function will
+    /// end up being compiled into wasm.
+    pub use_dependencies: HashSet<String>,
+
     /// `compile_dependencies` tracks actual dependencies to be compiled into wasm.
     /// This field is inferred based on the config function signature, not the use statements.
     /// This field is set after parsing, as it requires verification that modules exist
@@ -650,42 +657,55 @@ pub fn set_dep(deps: &mut HashMap<String, Result<Vec<String>, String>>, dep_name
     set_dep_inner(deps, dep_name, field);
 }
 
-pub fn set_dependencies_recursively(deps: &mut HashMap<String, Result<Vec<String>, String>>, tree: &syn::UseTree) {
-    let mut past_names = vec![];
-    iterate_item_tree(&mut past_names, tree, &mut |names, renamed, wildcard| {
-        // first, find the actual module name
-        let (mod_name, specific_import) = match parse_module_name_from_use_tree(names) {
-            Some(a) => a,
-            None => return,
-        };
-        // if the last part is a wildcard, then we want all imports.
-        // also: if there is no specific import, this means the last component
-        // is "outputs", and then we also want to use a wildcard
-        let last_part = match (wildcard, specific_import) {
-            (true, _) => "*".to_string(),
-            (false, None) => "*".to_string(),
-            (false, Some(x)) => x.to_string(),
-        };
+// pub fn set_dependencies_recursively(deps: &mut HashMap<String, Result<Vec<String>, String>>, tree: &syn::UseTree) {
+//     let mut past_names = vec![];
+//     iterate_item_tree(&mut past_names, tree, &mut |names, renamed, wildcard| {
+//         // first, find the actual module name
+//         let (mod_name, specific_import) = match parse_module_name_from_use_tree(names) {
+//             Some(a) => a,
+//             None => return,
+//         };
+//         // if the last part is a wildcard, then we want all imports.
+//         // also: if there is no specific import, this means the last component
+//         // is "outputs", and then we also want to use a wildcard
+//         let last_part = match (wildcard, specific_import) {
+//             (true, _) => "*".to_string(),
+//             (false, None) => "*".to_string(),
+//             (false, Some(x)) => x.to_string(),
+//         };
 
-        // dont allow "use X::outputs::something as abc"
-        // renaming only allowed for "use X::outputs as x_outputs"
-        if last_part != "*" && renamed.is_some() {
-            return;
+//         // dont allow "use X::outputs::something as abc"
+//         // renaming only allowed for "use X::outputs as x_outputs"
+//         if last_part != "*" && renamed.is_some() {
+//             return;
+//         }
+//         let renamed = match renamed {
+//             Some(x) => x,
+//             None => mod_name.to_string()
+//         };
+//         set_dep(deps, mod_name, &renamed, last_part);
+//     });
+// }
+
+pub fn set_use_dependencies_recursively(deps: &mut HashSet<String>, tree: &syn::UseTree) {
+    let mut past_names = vec![];
+    iterate_item_tree(&mut past_names, tree, &mut |names, _renamed, _wildcard| {
+        // get first real module name besides "self", "crate", or "super"
+        for name in names {
+            if name != "self" && name != "crate" && name != "super" {
+                deps.insert(name.to_string());
+                break;
+            }
         }
-        let renamed = match renamed {
-            Some(x) => x,
-            None => mod_name.to_string()
-        };
-        set_dep(deps, mod_name, &renamed, last_part);
     });
 }
 
 /// TODO: how to differentiate between hira dependencies like another hira module
 /// and a normal crate/module that this module wants to use...
-pub fn set_dependencies(_module: &mut HiraModule2, _item: &mut syn::ItemUse) {
-    // let mut deps = std::mem::take(&mut module.dependencies);
-    // set_dependencies_recursively(&mut deps, &item.tree);
-    // module.dependencies = deps;
+pub fn set_use_dependencies(module: &mut HiraModule2, item: &mut syn::ItemUse) {
+    let mut deps = std::mem::take(&mut module.use_dependencies);
+    set_use_dependencies_recursively(&mut deps, &item.tree);
+    module.use_dependencies = deps;
 }
 
 pub fn set_extern_crates(module: &mut HiraModule2, item: &mut syn::ItemExternCrate) {
@@ -746,7 +766,7 @@ pub fn parse_module_from_stream(stream: TokenStream) -> Result<HiraModule2, Toke
         &mut mod_def,
         &[set_config_fn_sig],
         &[set_input_item_struct],
-        &[set_dependencies],
+        &[set_use_dependencies],
         &[set_outputs],
         &[set_capability_params],
         &[set_extern_crates],
@@ -769,6 +789,8 @@ mod tests {
     fn basic_mod2_parsing_works() {
         let code = r#"
         mod hello_world {
+            // most basic use:
+            use super::other_thing::outputs::something;
             // these should be represented the same way:
             use crate::dependency_b::outputs;
             use crate::dependency_a::outputs::*;
@@ -806,6 +828,13 @@ mod tests {
         assert_eq!(module.name, "hello_world");
         assert_eq!(module.config_fn_signature_inputs.len(), 1);
         assert_eq!(module.config_fn_signature_inputs[0], "& mut Input");
+        assert!(module.use_dependencies.contains("dependency_b"));
+        assert!(module.use_dependencies.contains("dependency_a"));
+        assert!(module.use_dependencies.contains("somedep1"));
+        assert!(module.use_dependencies.contains("somedep2"));
+        assert!(module.use_dependencies.contains("other_thing"));
+        assert!(module.use_dependencies.contains("some_library"));
+        assert_eq!(module.use_dependencies.len(), 6);
         assert!(module.input_struct.contains("pub a"));
         assert!(module.input_struct.contains("pub struct Input"));
     }

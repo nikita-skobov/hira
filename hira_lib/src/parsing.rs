@@ -482,4 +482,52 @@ mod tests {
         assert_eq!(outs[2].1, None);
         assert_eq!(outs[2].2, true);
     }
+
+    #[test]
+    fn iterating_item_tree_works_self() {
+        let tokens: TokenStream = "use self::some_module::some_thing;".parse().unwrap();
+        let item_tree = syn::parse2::<ItemUse>(tokens).unwrap();
+        let mut outs = vec![];
+        let mut past_names = vec![];
+        iterate_item_tree(&mut past_names, &item_tree.tree, &mut |a, b, c| {
+            outs.push((a.to_vec(), b, c));
+        });
+        assert_eq!(outs[0].0, &["self", "some_module", "some_thing"]);
+    }
+
+    #[test]
+    fn iterating_item_tree_works_crate() {
+        let tokens: TokenStream = "use crate::some_module::some_thing;".parse().unwrap();
+        let item_tree = syn::parse2::<ItemUse>(tokens).unwrap();
+        let mut outs = vec![];
+        let mut past_names = vec![];
+        iterate_item_tree(&mut past_names, &item_tree.tree, &mut |a, b, c| {
+            outs.push((a.to_vec(), b, c));
+        });
+        assert_eq!(outs[0].0, &["crate", "some_module", "some_thing"]);
+    }
+
+    #[test]
+    fn iterating_item_tree_works_super() {
+        let tokens: TokenStream = "use super::some_module::some_thing;".parse().unwrap();
+        let item_tree = syn::parse2::<ItemUse>(tokens).unwrap();
+        let mut outs = vec![];
+        let mut past_names = vec![];
+        iterate_item_tree(&mut past_names, &item_tree.tree, &mut |a, b, c| {
+            outs.push((a.to_vec(), b, c));
+        });
+        assert_eq!(outs[0].0, &["super", "some_module", "some_thing"]);
+    }
+
+    #[test]
+    fn iterating_item_tree_works_dotdotfirst() {
+        let tokens: TokenStream = "use ::some_module::some_thing;".parse().unwrap();
+        let item_tree = syn::parse2::<ItemUse>(tokens).unwrap();
+        let mut outs = vec![];
+        let mut past_names = vec![];
+        iterate_item_tree(&mut past_names, &item_tree.tree, &mut |a, b, c| {
+            outs.push((a.to_vec(), b, c));
+        });
+        assert_eq!(outs[0].0, &["some_module", "some_thing"]);
+    }
 }
