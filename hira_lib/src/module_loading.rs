@@ -842,20 +842,18 @@ mod tests {
         let code = r#"
         mod hello_world {
             // most basic use:
-            use super::other_thing::outputs::something;
+            use super::other_thing::outputs321::something;
             // these should be represented the same way:
-            use crate::dependency_b::outputs;
-            use crate::dependency_a::outputs::*;
+            use crate::dependency_b;
+            use crate::dependency_a::*;
             // groups work:
             use crate::{
-                // xyz should resolve to somedep1
-                somedep1::outputs as xyz,
-                // somedep2 should have explicit outputs A1, and A2
+                somedep1::outputs321 as xyz,
                 somedep2::{
-                    outputs::A1,
-                    outputs::A2,
+                    A1,
+                    A2,
                     // should not allow renaming specific fields
-                    outputs::A3 as somethingelse,
+                    A3 as somethingelse,
                 }
             };
             // ignored:
