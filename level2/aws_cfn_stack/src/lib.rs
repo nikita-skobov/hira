@@ -4,29 +4,47 @@ use hira_lib::level0::*;
 use aws_config;
 use aws_sdk_cloudformation::{self, types::{Stack, Capability, OnFailure}};
 
+use crate::aws_cfn_stack::SavedTemplate;
+
 pub async fn runtime_main(data: &Vec<String>) {
     // // TODO: allow user to customize region.
     let shared_config = aws_config::from_env().load().await;
     let client = aws_sdk_cloudformation::Client::new(&shared_config);
+    let mut stack_map: HashMap<String, Vec<aws_cfn_stack::SavedTemplate>> = HashMap::new();
 
     for stack_str in data {
         let stack: aws_cfn_stack::SavedStack = cfn_resources::serde_json::from_str(&stack_str).expect("Failed to deserialize generated json file");
-        // TODO: merge resources based on stack names
-        for (stack_name, template) in stack.template.iter() {
-            println!("About to deploy stack: {stack_name}");
-            for (_, resource) in template.resources.iter() {
-                println!("{:#?}", resource.properties);
+        for (stack_name, template) in stack.template {
+            if let Some(existing) = stack_map.get_mut(&stack_name) {
+                existing.push(template);
+            } else {
+                stack_map.insert(stack_name, vec![template]);
             }
-            // we make it pretty so if a user needs to look at the stack in Cfn console, it looks nice
-            let template_body = cfn_resources::serde_json::to_string_pretty(template).expect("Failed to serialize template");
-            if let Err(e) = create_or_update_stack(&client, stack_name, &template_body).await {
-                panic!("Failed to create stack {stack_name}\n{e}");
-            }
-            if let Err(e) = wait_for_output(&client, &stack_name).await {
-                panic!("Failed to create stack {stack_name}\n{e}");
-            }
+            // stack.template is guaranteed to only have 1 template, we can break here
+            break;
         }
     }
+
+    for (stack_name, templates) in stack_map {
+        println!("About to deploy stack: {stack_name}");
+        let mut final_template = SavedTemplate::default();
+        for template in templates {
+            final_template.resources.extend(template.resources);
+            final_template.outputs.extend(template.outputs);
+        }
+        for (_, resource) in final_template.resources.iter() {
+            println!("{:#?}", resource.properties);
+        }
+        // we make it pretty so if a user needs to look at the stack in Cfn console, it looks nice
+        let template_body = cfn_resources::serde_json::to_string_pretty(&final_template).expect("Failed to serialize template");
+        if let Err(e) = create_or_update_stack(&client, &stack_name, &template_body).await {
+            panic!("Failed to create stack {stack_name}\n{e}");
+        }
+        if let Err(e) = wait_for_output(&client, &stack_name).await {
+            panic!("Failed to create stack {stack_name}\n{e}");
+        }
+    }
+
 }
 
 pub async fn does_stack_exist(client: &aws_sdk_cloudformation::Client, name: &str) -> Result<bool, String> {
@@ -98,7 +116,12 @@ pub async fn describe_stack(client: &aws_sdk_cloudformation::Client, name: &str)
             }
         }
         Err(e) => {
+            let dne_error = format!("Stack with id {name} does not exist");
             let e_str = format!("{:#?}", e);
+            // we consider this still in progress, since we're waiting for it to show up in the API.
+            if e_str.contains(&dne_error) {
+                return Ok(None);
+            }
             return Err(e_str);
         }
     }
@@ -150,7 +173,7 @@ pub async fn create_or_update_stack(client: &aws_sdk_cloudformation::Client, nam
         {
             Ok(_) => {},
             Err(e) => {
-                let e_str = format!("{:#?}", e);
+                let e_str = format!("Failed to update:\n{:#?}", e);
                 if e_str.contains("No updates are to be performed") {
                     return Ok(())
                 }
@@ -169,7 +192,7 @@ pub async fn create_or_update_stack(client: &aws_sdk_cloudformation::Client, nam
             .stack_name(name)
             .template_body(body)
             .send()
-            .await.map_err(|e| format!("{:#?}", e))?;
+            .await.map_err(|e| format!("Failed to create:\n{:#?}", e))?;
     }
     Ok(())
 }
@@ -236,8 +259,9 @@ pub mod aws_cfn_stack {
 
     #[derive(Default)]
     pub struct Input {
-        /// if left empty (default), we will use the name of your module
-        /// as the stack name.
+        /// if left empty (default), we set the stack name to `hira-gen-default-stack`
+        /// Optionally, provide a stack name of your own. You can group resources into 1 stack by ensuring
+        /// all of the stack names are the same.
         pub stack_name: String,
         pub resources: Vec<Resource>,
         /// a list of function invocations that should be ran
@@ -271,12 +295,9 @@ pub mod aws_cfn_stack {
         }
     }
 
-    fn validate_stack_name(user_mod_name: &str, current_stack_name: &str) -> Result<String, String> {
+    fn validate_stack_name(_user_mod_name: &str, current_stack_name: &str) -> Result<String, String> {
         let stack_name = if current_stack_name.is_empty() {
-            let mut stack_name = user_mod_name.to_string();
-            stack_name = stack_name.replace("_", "-");
-            stack_name.truncate(128);
-            stack_name
+            "hira-gen-default-stack".to_string()
         } else {
             current_stack_name.to_string()
         };

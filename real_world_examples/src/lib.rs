@@ -21,7 +21,18 @@ pub mod my_lambda {
     // it defined, and is able to deduce that we want our lambda function to be triggered
     // via Lambda Function Url. It generates cloudformation code to ensure
     // our function can be invoked via a Function Url.
-    fn lambda_main(a: h_aws_lambda::FunctionUrlEvent) -> String {
+    pub fn lambda_main(a: h_aws_lambda::FunctionUrlEvent) -> String {
         format!("You sent me:\n{}", a.body)
+    }
+}
+
+/// by default other modules are grouped together in the same stack.
+#[hira]
+pub mod other_lambda_fn {
+    use super::h_aws_lambda;
+    pub fn config(_lambdainput: &mut h_aws_lambda::Input) {}
+
+    pub fn lambda_main(a: h_aws_lambda::FunctionUrlEvent) -> String {
+        format!("Other lambda received::\n{}", a.body)
     }
 }
