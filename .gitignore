@@ -2,3 +2,4 @@ target
 .env
 testing/snapshots/
 wasm_out
+*.txt
