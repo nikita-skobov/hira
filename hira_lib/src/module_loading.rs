@@ -6,7 +6,7 @@ use serde::{Serialize, Deserialize};
 use proc_macro2::TokenStream;
 use quote::{ToTokens};
 
-use crate::parsing::{remove_surrounding_quotes, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples};
+use crate::parsing::{remove_surrounding_quotes, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples, is_public, has_derive};
 use crate::{wasm_types::*, level0::*};
 
 
@@ -74,8 +74,10 @@ pub enum OutputType {
 pub struct HiraModule2 {
     pub name: String,
     pub contents: String,
+    pub config_fn_is_pub: bool,
     pub config_fn_signature_inputs: Vec<String>,
     pub is_pub: bool,
+    pub input_struct_has_default: bool,
     pub input_struct: String,
     /// List of names of fields + module names that this
     /// module depends on. For example can be a single module
@@ -318,12 +320,49 @@ impl HiraModule2 {
                 self.compile_dependencies.push(DependencyTypeName::Library(after_mut.trim().to_string()));
             }
         }
-        // if this has more than 1 signature input, and its not a L1 module, then it is a L2 module
-        //    (because we know its not an L1 module, and L3 modules can only have 1 signature input)
+        // if it has no signature inputs:
+        // its invalid. no type of module can have 0 inputs.
+        // if it has only 1 signature input:
+        // - if the signature input is a Self Input (ie &mut Input)
+        //   then it must be a lvl2 module
+        // - if the signature input is a lvl2 Input (ie &mut some_lvl2_mod::Input)
+        //   then it must be a lvl3 module
+        // - if the signature input is a Level0 module (ie &mut L0...)
+        //   then it is invalid, since only level2 modules can use Level0 modules
+        //   and level2 modules must contain a Self Input first.
+        // if this has more than 1 signature input then it is a L2 module
+        //    (because only L3 modules have exactly 1 signature input)
         // if this module does not have an input struct, it MUST be a L3 module
         //    (because all other types of modules must specify their input shape)
         // otherwise we default to assume its level2, but we perform validation afterwards
-        if self.config_fn_signature_inputs.len() > 1 {
+        if self.config_fn_signature_inputs.len() == 0 {
+            return Err(compiler_error(
+                &format!("Your config function signature is empty. Make sure to have at least 1 input parameter in your config function. For example `pub fn config(some_input: &mut some_other_module::Input)`")
+            ));
+        }
+        if self.config_fn_signature_inputs.len() == 1 {
+            if self.config_fn_signature_inputs[0] == "& mut Input" {
+                self.level = ModuleLevel::Level2;
+            } else if self.compile_dependencies.len() == 1 {
+                match self.compile_dependencies[0] {
+                    DependencyTypeName::Mod1Or2(_) => {
+                        self.level = ModuleLevel::Level3;
+                    }
+                    DependencyTypeName::Library(_) => {
+                        self.level = ModuleLevel::Level2;
+                        return Err(compiler_error(
+                            &format!("Your config function only has 1 input, and it is a L0 input. L0 inputs can only be used by level2 modules, and level2 modules must have the first parameter of their config function be `&mut Input`. Ensure your level2 module has an Input struct, and that Input struct is the first parameter to your config function.")
+                        ));
+                    }
+                }
+            } else {
+                // we detected their config function has something, but it is not a Self input
+                // it is not a L0 input, nor is it an input on another module. this is invalid.
+                return Err(compiler_error(
+                    &format!("Your config function only has 1 input: {}, but it is not a Self Input (&mut Input), nor it is an input on another module (&mut other_module::Input), nor is it a Level0 input (eg &mut L0Core). This is unsupported. Ensure your config function has a valid signature.", self.config_fn_signature_inputs[0])
+                ));
+            }
+        } else if self.config_fn_signature_inputs.len() > 1 {
             self.level = ModuleLevel::Level2;
         } else if self.input_struct.is_empty() {
             self.level = ModuleLevel::Level3;
@@ -331,9 +370,34 @@ impl HiraModule2 {
             self.level = ModuleLevel::Level2;
         }
 
+        if self.level == ModuleLevel::Level2 {
+            if self.input_struct.is_empty() {
+                return Err(compiler_error(
+                    &format!("Detected module {} as {:?}, but it is missing an Input struct. All Level2 modules must contain an Input struct, and reference it in its config function signature", self.name, self.level)
+                ));
+            }
+            if !self.input_struct_has_default {
+                return Err(compiler_error(
+                    &format!("Module {} has an Input struct that is missing a Default implementation. Hira relies on Input structs having a default function. Add a default implementation by adding `#[derive(Default)]` above your input struct, or create a manual default implementation inside your module like `impl Default for Input {{ fn default() -> Self {{ ... }} }}`", self.name)
+                ));
+            }
+            if !self.config_fn_signature_inputs.iter().any(|x| x.contains("& mut Input")) {
+                return Err(compiler_error(
+                    &format!("Detected module {} as {:?}, but its config function signature does not reference its own Input struct. All Level2 modules must reference their Self Input in their config function signatures. Eg: `pub fn config(&mut Input)`", self.name, self.level)
+                ));
+            }
+        }
+
         if self.level != ModuleLevel::Level3 && !self.is_pub {
             return Err(compiler_error(
                 &format!("Detected module {} as {:?}, but it is not marked public. Level2 modules must be public", self.name, self.level)
+            ));
+        }
+
+        // config function must be public
+        if !self.config_fn_is_pub {
+            return Err(compiler_error(
+                &format!("Config function in module {} is not public. Ensure your config function starts with `pub fn config(...)`", self.name)
             ));
         }
 
@@ -510,6 +574,7 @@ pub fn set_config_fn_sig(module: &mut HiraModule2, item: &mut syn::ItemFn) {
     let sig = &item.sig;
     let fn_name = get_ident_string(&sig.ident);
     if fn_name != "config" { return }
+    module.config_fn_is_pub = is_public(&item.vis);
     for input in &sig.inputs {
         let push_s = match input {
             syn::FnArg::Receiver(_) => "self".to_string(),
@@ -540,7 +605,39 @@ pub fn set_capability_params(module: &mut HiraModule2, item: &mut syn::ItemConst
 pub fn set_input_item_struct(module: &mut HiraModule2, item: &mut syn::ItemStruct) {
     let struct_name = get_ident_string(&item.ident);
     if struct_name == "Input" {
+        if item.attrs.iter().any(|att| has_derive(&att.meta, "Default")) {
+            module.input_struct_has_default = true;
+        }
         module.input_struct = item.to_token_stream().to_string();
+    }
+}
+
+pub fn check_for_default_impl(module: &mut HiraModule2, item: &mut syn::ItemImpl) {
+    let (_, path, _) = if let Some(trait_tuple) = &item.trait_ {
+        trait_tuple
+    } else {
+        return
+    };
+    let first = if let Some(first) = path.segments.first() {
+        first
+    } else {
+        return
+    };
+    let id_string = get_ident_string(&first.ident);
+    if id_string != "Default" {
+        return;
+    }
+    let type_path = if let syn::Type::Path(p) = &*item.self_ty {
+        p
+    } else {
+        return;
+    };
+    for seg in type_path.path.segments.iter() {
+        let id = get_ident_string(&seg.ident);
+        if id == "Input" {
+            module.input_struct_has_default = true;
+            break;
+        }
     }
 }
 
@@ -679,6 +776,7 @@ pub fn parse_module_from_stream(stream: TokenStream) -> Result<HiraModule2, Toke
         &[set_outputs],
         &[set_capability_params],
         &[set_extern_crates],
+        &[check_for_default_impl],
     );
     Ok(hira_mod)
 }
@@ -715,7 +813,7 @@ mod tests {
             // ignored:
             use some_library;
 
-
+            #[derive(Default)]
             pub struct Input {
                 pub a: u32,
             }
@@ -755,6 +853,7 @@ mod tests {
             mod outputs {
                 pub const HEY: &'static str = "dsa";
             }
+            #[derive(Default)]
             pub struct Input { pub a: u32 }
             pub fn config(input: &mut Input) {}
         }
@@ -780,6 +879,7 @@ mod tests {
     fn mod2_verify_works() {
         let code = r#"
         pub mod hello_world {
+            #[derive(Default)]
             pub struct Input {
                 pub a: u32,
             }
@@ -802,6 +902,7 @@ mod tests {
     fn mod2_multiple_params_works() {
         let code = r#"
         pub mod hello_world {
+            #[derive(Default)]
             pub struct Input {
                 pub a: u32,
             }
@@ -825,9 +926,198 @@ mod tests {
     }
 
     #[test]
+    fn mod2_properly_detect_lvl2() {
+        let code = r#"
+        pub mod hello_world {
+            // we dont have an Input struct defined, but our only input
+            // is a Self Input, therefore this should be detected as a lvl2 module
+            pub fn config(input: &mut Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let _ = module.verify_config_signature(&mut conf);
+        assert_eq!(module.level, ModuleLevel::Level2);
+    }
+
+    #[test]
+    fn mod2_lvl2_must_have_input_struct() {
+        let code = r#"
+        pub mod hello_world {
+            // it has more than 1 input, so it must be a lvl2. but there is no Input struct
+            pub fn config(input: &mut some_other::Input, core: &mut L0Core) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        assert_eq!(module.level, ModuleLevel::Level2);
+        let err = out.err().expect("Expected to get an error from verify");
+        assert_contains_str(err.to_string(), "missing an Input struct");
+    }
+
+    #[test]
+    fn mod2_lvl2_input_must_have_default_impl() {
+        let code = r#"
+        pub mod hello_world {
+            pub struct Input {}
+            pub fn config(input: &mut Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        assert_eq!(module.level, ModuleLevel::Level2);
+        let err = out.err().expect("Expected to get an error from verify");
+        assert_contains_str(err.to_string(), "missing a Default implementation");
+    }
+
+    #[test]
+    fn mod2_lvl2_can_detect_custom_default_impl() {
+        let code = r#"
+        pub mod hello_world {
+            pub struct Input {}
+            impl Default for Input {
+                fn default() -> Self { Input {} }
+            }
+            pub fn config(input: &mut Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        assert!(out.is_ok());
+        assert_eq!(module.level, ModuleLevel::Level2);
+        assert_eq!(module.input_struct_has_default, true);
+    }
+
+    #[test]
+    fn mod2_lvl2_input_struct_must_be_referenced() {
+        let code = r#"
+        pub mod hello_world {
+            #[derive(Default)]
+            pub struct Input {}
+            // it has more than 1 input, so it must be a lvl2. but is not referencing its self input
+            pub fn config(input: &mut some_other::Input, core: &mut L0Core) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        assert_eq!(module.level, ModuleLevel::Level2);
+        let err = out.err().expect("Expected to get an error from verify");
+        assert_contains_str(err.to_string(), "but its config function signature does not reference its own Input struct");
+    }
+
+    #[test]
+    fn mod2_properly_detect_lvl3() {
+        let code = r#"
+        pub mod hello_world {
+            // only 1 input, and its on some other module, this should be lvl3
+            pub fn config(input: &mut other_module::Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let _ = module.verify_config_signature(&mut conf);
+        assert_eq!(module.level, ModuleLevel::Level3);
+    }
+
+    #[test]
+    fn mod2_invalid_lvl2_module_signature() {
+        let code = r#"
+        pub mod hello_world {
+            // only 1 input, but its on L0. Therefore hello_world must be lvl2. but level2 modules must
+            // start with a Self Input.
+            pub fn config(input: &mut L0Core) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        assert_eq!(module.level, ModuleLevel::Level2);
+        let err = out.err().expect("Expected verify output to be an error");
+        assert_contains_str(err.to_string(), "Your config function only has 1 input, and it is a L0 input");
+    }
+
+    #[test]
+    fn mod2_config_must_be_pub_lvl2() {
+        let code = r#"
+        pub mod hello_world {
+            #[derive(Default)]
+            pub struct Input {}
+            fn config(input: &mut Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        assert_eq!(module.level, ModuleLevel::Level2);
+        let err = out.err().expect("Expected verify output to be an error");
+        assert_contains_str(err.to_string(), "Config function in module hello_world is not public");
+    }
+
+    #[test]
+    fn mod2_config_must_be_pub_lvl3() {
+        let code = r#"
+        pub mod hello_world {
+            fn config(input: &mut other_mod::Input) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        assert_eq!(module.level, ModuleLevel::Level3);
+        let err = out.err().expect("Expected verify output to be an error");
+        assert_contains_str(err.to_string(), "Config function in module hello_world is not public");
+    }
+
+    #[test]
+    fn mod2_invalid_unknown_module_signature() {
+        let code = r#"
+        pub mod hello_world {
+            // only 1 input, and its some random input we dont know about.
+            // this is invalid
+            pub fn config(input: &mut other_lib::OtherThing) {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        let err = out.err().expect("Expected verify output to be an error");
+        assert_contains_str(err.to_string(), "Your config function only has 1 input: & mut other_lib :: OtherThing,");
+    }
+
+    #[test]
+    fn mod2_invalid_config_empty() {
+        let code = r#"
+        pub mod hello_world {
+            pub fn config() {}
+        }
+        "#;
+        let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
+        let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
+        let mut conf = HiraConfig::default();
+        let out = module.verify_config_signature(&mut conf);
+        let err = out.err().expect("expected the output of verify to be an error");
+        assert_contains_str(err.to_string(), "Your config function signature is empty");
+    }
+
+    #[test]
     fn mod2_non_lvl3_must_be_pub() {
         let code = r#"
         mod hello_world {
+            #[derive(Default)]
             pub struct Input { pub a: u32 }
             pub fn config(input: &mut Input) {}
         }
@@ -865,6 +1155,7 @@ mod tests {
     fn mod2_outputs_work() {
         let code = r#"
         mod hello_world {
+            #[derive(Default)]
             pub struct Input { pub a: u32 }
             pub fn config(input: &mut Input) {}
 

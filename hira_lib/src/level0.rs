@@ -304,6 +304,7 @@ impl L0CodeReader {
             &[],
             &[],
             &[],
+            &[],
         );
         self.function_signatures = filler.function_signatures;
 

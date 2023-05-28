@@ -17,7 +17,7 @@ use syn::{
     ItemConst,
     ItemMod,
     ItemStruct,
-    Expr, ItemUse, Visibility, token::Pub, ItemExternCrate
+    Expr, ItemUse, Visibility, token::Pub, ItemExternCrate, Meta, ItemImpl
 };
 
 use crate::{module_loading::{HiraModule2, ModuleLevel}, wasm_types::{FunctionSignature, UserInput}, HiraConfig};
@@ -193,6 +193,7 @@ pub fn iterate_mod_def_generic<T>(
     mod_callbacks: &[fn(&mut T, &mut ItemMod)],
     const_callbacks: &[fn(&mut T, &mut ItemConst)],
     extern_crate_callbacks: &[fn(&mut T, &mut ItemExternCrate)],
+    impl_callbacks: &[fn(&mut T, &mut ItemImpl)],
 ) {
     let mut default_vec = vec![];
     let content = mod_def.content.as_mut().map(|x| &mut x.1).unwrap_or(&mut default_vec);
@@ -223,6 +224,11 @@ pub fn iterate_mod_def_generic<T>(
                     cb(thing, x);
                 }
             }
+            Item::Impl(x) => {
+                for cb in impl_callbacks {
+                    cb(thing, x);
+                }
+            }
             Item::ExternCrate(x) => {
                 for cb in extern_crate_callbacks {
                     cb(thing, x);
@@ -242,6 +248,7 @@ pub fn iterate_mod_def(
     mod_callbacks: &[fn(&mut HiraModule2, &mut ItemMod)],
     const_callbacks: &[fn(&mut HiraModule2, &mut ItemConst)],
     extern_crate_callbacks: &[fn(&mut HiraModule2, &mut ItemExternCrate)],
+    impl_callbacks: &[fn(&mut HiraModule2, &mut ItemImpl)],
 ) {
     module.name = get_ident_string(&mod_def.ident);
     module.is_pub = match mod_def.vis {
@@ -249,7 +256,7 @@ pub fn iterate_mod_def(
         _ => false,
     };
 
-    iterate_mod_def_generic(module, mod_def, fn_callbacks, struct_callbacks, use_callbacks, mod_callbacks, const_callbacks, extern_crate_callbacks);
+    iterate_mod_def_generic(module, mod_def, fn_callbacks, struct_callbacks, use_callbacks, mod_callbacks, const_callbacks, extern_crate_callbacks, impl_callbacks);
 
     module.contents = mod_def.to_token_stream().to_string();
 }
@@ -280,6 +287,42 @@ pub fn get_list_of_strings(stream: TokenStream) -> Vec<String> {
         }
     }
     out
+}
+
+pub fn has_derive(meta: &Meta, name: &str) -> bool {
+    let list = if let Meta::List(l) = meta {
+        l
+    } else {
+        // derive macros must be Meta::List
+        return false
+    };
+    // derive macros must be Paren
+    match list.delimiter {
+        syn::MacroDelimiter::Paren(_) => {},
+        _ => return false,
+    }
+
+    let first_item = if let Some(f) = list.path.segments.first() {
+        f
+    } else {
+        return false
+    };
+    let ident_str = get_ident_string(&first_item.ident);
+    if ident_str != "derive" {
+        return false;
+    }
+    for token in list.tokens.clone().into_iter() {
+        match token {
+            TokenTree::Ident(id) => {
+                let id_str = get_ident_string(&id);
+                if id_str == name {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 pub fn is_public(vis: &Visibility) -> bool {
