@@ -78,7 +78,7 @@ impl HiraConfig {
     }
     fn set_runtime_data(&mut self, runtime_name: &str, data: Vec<String>) {
         if let Some((_, _, _, existing_data)) = self.runtimes.get_mut(runtime_name) {
-            *existing_data = data;
+            existing_data.extend(data);
         }
     }
     fn new() -> Self {
@@ -315,9 +315,9 @@ async fn main() {{
         out_s.push(']');
         std::fs::write(&runtime_include_file, out_s)
             .map_err(|e| compiler_error(&format!("Failed to write runtime file {}\n{:?}", runtime_include_file, e)))?;
-        let mut out_s = "[".to_string();
+        let mut out_s = "[\n".to_string();
         for line in data {
-            out_s.push_str(&format!("r#\"{line}\"#,\n"));
+            out_s.push_str(&format!("    r#\"{line}\"#,\n"));
         }
         out_s.push(']');
         std::fs::write(&runtime_data_include_file, out_s)
