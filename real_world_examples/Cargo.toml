@@ -14,3 +14,9 @@ serde_json = "*"
 # our module depends on these other hira modules:
 aws_lambda = { path = "../level2/aws_lambda" }
 aws_cfn_stack = { path = "../level2/aws_cfn_stack" }
+aws_cloudfront_distribution = { path = "../level2/aws_cloudfront_distribution" }
+
+# third party dependencies can be added via extern crate:
+iam = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "f903f340a75bcc64f22b63e130874282f3fa56da" }
+cloud_front = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "f903f340a75bcc64f22b63e130874282f3fa56da" }
+cfn_resources = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "f903f340a75bcc64f22b63e130874282f3fa56da" }
