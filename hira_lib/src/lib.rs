@@ -352,7 +352,9 @@ fi
                     Self::append_to_build_script(meta, runtime_name, &self.build_script_path, &target_dir, &self.crate_name, &hira_runtime_output_path)?;
                 }
             }
-            Self::output_include_files(&runtime_include_file, &runtime_data_include_file, &code, &data)?;
+            if self.should_do_file_ops {
+                Self::output_include_files(&runtime_include_file, &runtime_data_include_file, &code, &data)?;
+            }
         }
         Ok(())
     }
