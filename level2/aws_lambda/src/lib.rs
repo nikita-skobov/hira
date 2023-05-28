@@ -203,6 +203,25 @@ pub mod h_aws_lambda {
 
     pub const BUCKET_UNKNOWN: &str = "HIRA_GEN_BUCKET_UNKNOWN";
 
+    #[derive(cfn_resources::serde::Serialize, cfn_resources::serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    #[serde(default)]
+    #[derive(Default)]
+    pub struct FunctionUrlEvent {
+        pub version: String,
+        pub body: String,
+        pub is_base64_encoded: bool,
+    }
+
+    #[derive(cfn_resources::serde::Serialize, cfn_resources::serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct FunctionUrlResponse {
+        pub status_code: u32,
+        pub body: String,
+        pub is_base64_encoded: bool,
+        pub headers: std::collections::HashMap<String, String>,
+    }
+
     /// statements contain a tuple of: effect, action, resource.
     /// eg: ("Allow", "*", "*")
     pub fn create_policy_doc(statements: &[(String, String, String)]) -> Value {
