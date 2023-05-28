@@ -857,8 +857,8 @@ pub fn set_use_dependencies(module: &mut HiraModule2, item: &mut syn::ItemUse) {
         let replacement = "use {};".parse::<TokenStream>().unwrap();
         let replacement_item = syn::parse2::<syn::ItemUse>(replacement).unwrap();
         *item = replacement_item;
+        module.fill_outputs.extend(outputs);
     }
-    module.fill_outputs = outputs;
     module.use_dependencies = deps;
 }
 
@@ -1121,19 +1121,14 @@ mod tests {
         let code = r#"
         pub mod hello_world {
             use super::some_module::outputs::THING;
-            #[derive(Default)]
-            pub struct Input {
-                pub a: u32,
-            }
-            mod outputs {
-                pub const HEY: &'static str = "dsa";
-            }
-            pub fn config(input: &mut Input) {}
+            use super::another_module;
+            pub fn config(input: &mut another_module::Input) {}
         }
         "#;
         let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
         let mut module = parse_module_from_stream(stream).expect("failed to parse test case as module");
         let mut conf = HiraConfig::default();
+        conf.modules2.insert("another_module".to_string(), Default::default());
         let out = module.verify_config_signature(&mut conf);
         assert!(out.is_ok());
         // this is what it would look like if it was still in, and we removed all spaces:
