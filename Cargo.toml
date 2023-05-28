@@ -6,6 +6,7 @@ members = [
     "level2/aws_cfn",
     "level2/aws_lambda",
     "level2/aws_regions",
+    "level2/aws_cfn_stack",
 ]
 
 # compile dependencies in release mode
