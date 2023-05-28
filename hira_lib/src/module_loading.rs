@@ -301,10 +301,21 @@ impl HiraModule2 {
         // seems expensive.
         // we know the module name, so we just search for the string `mod {mod_name} {`
         // and add our const item right after.
-        let search_str = format!("mod {mod_name} {{");
-        let replaced = format!("{search_str}\nconst {key}: &str = r#\"{val}\"#;");
-        let new = contents.replace(&search_str, &replaced);
-        *contents = new;
+        let search_str = format!("mod {mod_name}");
+        let search_str_len = search_str.len();
+        let insert = format!("const {key}: &str = r#\"{val}\"#;");
+        if let Some(index) = contents.find(&search_str) {
+            let mut current_index = index + search_str_len;
+            if let Some(next_str) = contents.get(current_index..) {
+                for c in next_str.chars() {
+                    current_index += 1;
+                    if c == '{' {
+                        break;
+                    }
+                }
+                contents.insert_str(current_index, &insert);
+            }
+        }
     }
 
     /// this should only be called for lvl3 modules.
