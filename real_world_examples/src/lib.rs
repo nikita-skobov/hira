@@ -1,6 +1,6 @@
 use hira::hira;
 use aws_lambda::h_aws_lambda;
-use aws_cloudfront_distribution::aws_cloudfront_distribution;
+use ::aws_cloudfront_distribution::lambda_url_distribution;
 
 #[hira]
 pub mod my_lambda {
@@ -25,6 +25,10 @@ pub mod my_lambda {
     pub fn lambda_main(a: h_aws_lambda::FunctionUrlEvent) -> String {
         format!("You sent me:\n{}", a.body)
     }
+
+    pub mod outputs {
+        pub use super::h_aws_lambda::outputs::*;
+    }
 }
 
 /// by default other modules are grouped together in the same stack.
@@ -33,7 +37,7 @@ pub mod other_lambda_fn {
     use super::h_aws_lambda;
 
     pub mod outputs {
-        pub use super::h_aws_lambda::outputs::LOGICAL_FUNCTION_URL_NAME;
+        pub use super::h_aws_lambda::outputs::*;
     }
 
     pub fn config(_lambdainput: &mut h_aws_lambda::Input) {}
@@ -46,14 +50,16 @@ pub mod other_lambda_fn {
 #[hira]
 pub mod making_my_distr {
     extern crate cfn_resources;
-    use super::other_lambda_fn::outputs::*;
-    use super::aws_cloudfront_distribution;
-    use self::aws_cloudfront_distribution::CustomOriginConfigOriginProtocolPolicyEnum;
+    
+    use super::my_lambda::outputs::LOGICAL_FUNCTION_URL_NAME as FIRST_URL;
+    use super::other_lambda_fn::outputs::LOGICAL_FUNCTION_URL_NAME as OTHER_URL;
+    use super::lambda_url_distribution;
+    use self::lambda_url_distribution::LambdaApiEndpoint;
 
-    pub fn config(distrinput: &mut aws_cloudfront_distribution::Input) {
-        let func_url = cfn_resources::get_att(LOGICAL_FUNCTION_URL_NAME, "FunctionUrl");
-        let select_domain = cfn_resources::select_split(2, "/", func_url);
-        distrinput.default_origin_domain_name = cfn_resources::StrVal::Val(select_domain);
-        distrinput.default_origin_protocol_policy = CustomOriginConfigOriginProtocolPolicyEnum::Httpsonly;
+    pub fn config(distrinput: &mut lambda_url_distribution::Input) {
+        distrinput.endpoints = vec![
+            LambdaApiEndpoint { path: "/".into(), function_url_id: FIRST_URL.into() },
+            LambdaApiEndpoint { path: "/test".into(), function_url_id: OTHER_URL.into() },
+        ]
     }
 }
