@@ -13,6 +13,8 @@ pub mod lambda_url_distribution {
     use super::L0Core;
     use super::aws_cloudfront_distribution;
     use self::cfn_resources::ToOptStrVal;
+
+    pub use self::aws_cloudfront_distribution::CustomDomainSettings;
     pub use self::cloud_front::distribution::Origin;
     pub use self::cloud_front::distribution::CfnDistribution;
     pub use self::cloud_front::distribution::CustomOriginConfig;
@@ -38,6 +40,9 @@ pub mod lambda_url_distribution {
         /// this represents the default endpoint.
         /// all endpoints paths must be unique.
         pub endpoints: Vec<LambdaApiEndpoint>,
+
+        /// optionally provide settings to configure your distribution with a custom domain name + https cert
+        pub custom_domain_settings: Option<CustomDomainSettings>,
     }
 
     pub fn config(inp: &mut Input, distrinput: &mut aws_cloudfront_distribution::Input, l0core: &mut L0Core) {
@@ -63,6 +68,7 @@ pub mod lambda_url_distribution {
 
         distrinput.default_origin_domain_name = aws_cloudfront_distribution::select_function_url(&default.function_url_id);
         distrinput.default_origin_protocol_policy = CustomOriginConfigOriginProtocolPolicyEnum::Httpsonly;
+        distrinput.custom_domain_settings = inp.custom_domain_settings.clone();
 
         let mut extra_origins = vec![];
         for (i, endpoint) in other_endpoints.iter().enumerate() {
@@ -88,6 +94,7 @@ pub mod lambda_url_distribution {
 #[hira::hira]
 pub mod aws_cloudfront_distribution {
     extern crate cloud_front;
+    extern crate route53;
     extern crate cfn_resources;
 
     use super::L0Core;
@@ -102,6 +109,9 @@ pub mod aws_cloudfront_distribution {
     pub use self::cloud_front::distribution::CacheBehavior;
     pub use self::cloud_front::distribution::CustomOriginConfigOriginProtocolPolicyEnum;
     pub use self::cloud_front::distribution::DefaultCacheBehaviorViewerProtocolPolicyEnum;
+    pub use self::cloud_front::distribution::ViewerCertificateSslSupportMethodEnum;
+    pub use self::cloud_front::distribution::ViewerCertificateMinimumProtocolVersionEnum;
+    pub use self::cloud_front::distribution::ViewerCertificate;
 
     pub mod outputs {
         pub const LOGICAL_DISTR_NAME: &str = "UNDEFINED";
@@ -119,6 +129,42 @@ pub mod aws_cloudfront_distribution {
         cfn_resources::StrVal::Val(select_domain)
     }
 
+    #[derive(Clone)]
+    pub struct CustomDomainSettings {
+        /// required. will error if not provided.
+        pub acm_arn: String,
+        /// required. will error if not provided.
+        /// Note: this should not end with a .
+        /// for example if your domain is mywebsite.com
+        /// you should provide it exactly as "mywebsite.com"
+        /// If you wish this distribution to be setup as a subdomain, you should
+        /// still provide domain_name = "mywebsite.com", and then
+        /// optionally set the subdomain field to Some("mysubdomain").
+        pub domain_name: String,
+        pub subdomain: Option<String>,
+        /// by default we set this to sni-only
+        pub ssl_support_method: ViewerCertificateSslSupportMethodEnum,
+        /// by default we set this to TLSv1.2_2021
+        pub minimum_protocol_version: ViewerCertificateMinimumProtocolVersionEnum,
+        /// by default this is true, and a route53 record will be created
+        /// that points from your domain_name to this cloudfront distribution.
+        /// optionally set it to false if you need to customize your route53 record
+        pub enable_route_53: bool,
+    }
+
+    impl Default for CustomDomainSettings {
+        fn default() -> Self {
+            Self {
+                acm_arn: Default::default(),
+                domain_name: Default::default(),
+                subdomain: Default::default(),
+                ssl_support_method: ViewerCertificateSslSupportMethodEnum::Snionly,
+                minimum_protocol_version: ViewerCertificateMinimumProtocolVersionEnum::Tlsv122021,
+                enable_route_53: true,
+            }
+        }
+    }
+
     pub struct Input {
         /// by default we create the distribution enabled and ready to use.
         /// optionally set this field to true to create the distribution
@@ -127,6 +173,16 @@ pub mod aws_cloudfront_distribution {
 
         /// By default set to allow-all.
         pub viewer_protocol_policy: DefaultCacheBehaviorViewerProtocolPolicyEnum,
+
+        /// by default this is left empty and that means your cloudfront distribution is
+        /// created with the default cloudfront domain name (eg something like: d111111abcdef8.cloudfront.net)
+        /// If provided, we configure this distribution with
+        /// - aliases pointing to the domain name
+        /// - viewer certificate settings using the provided ACM Arn.
+        ///
+        /// Optionally you can also enable route53 which will create a route53 record for your domain
+        /// to point to this distribution.
+        pub custom_domain_settings: Option<CustomDomainSettings>,
 
         /// the domain name of your default origin. If using an S3 bucket website
         /// this should be WebsiteUrl returned from your S3 bucket.
@@ -162,6 +218,7 @@ pub mod aws_cloudfront_distribution {
         /// - default_cache_behavior
         /// - enabled
         /// - origins
+        /// - viewer_certificate
         ///
         /// all other fields are left default. You can optionally set those values by filling in
         /// this struct.
@@ -189,12 +246,15 @@ pub mod aws_cloudfront_distribution {
                 default_origin_config_options: Default::default(),
                 default_distribution_options: Default::default(),
                 extra_origins: Default::default(),
+                custom_domain_settings: Default::default(),
             }
         }
     }
 
     pub fn config(myinput: &mut Input, stackinp: &mut aws_cfn_stack::Input, l0core: &mut L0Core) {
         let user_mod_name = l0core.users_module_name();
+        let logical_distr_name = format!("hiragendist{user_mod_name}");
+        let logical_distr_name = logical_distr_name.replace("_", "");
         let enabled = !myinput.disabled;
         let default_origin_id = "origin0";
         let default_origin_config = CustomOriginConfig {
@@ -207,11 +267,66 @@ pub mod aws_cloudfront_distribution {
             custom_origin_config: Some(default_origin_config),
             ..myinput.default_origin_options.clone()
         };
+        let (viewer_certificate, alias_config, route53_resource) = if let Some(settings) = &myinput.custom_domain_settings {
+            if settings.acm_arn.is_empty() {
+                l0core.compiler_error(&format!("Provided custom_domain_settings, but acm_arn field is empty. This is required."));
+                return;
+            }
+            if settings.domain_name.is_empty() {
+                l0core.compiler_error(&format!("Provided custom_domain_settings, but domain_name field is empty. This is required."));
+                return;
+            }
+            let alias = match &settings.subdomain {
+                Some(a) => {
+                    if a.ends_with(".") {
+                        l0core.compiler_error(&format!("Provided custom_domain_settings.subdomain '{}' ends with . This is invalid. must not end in a . as that is assumed", a));
+                        return; 
+                    }
+                    format!("{}.{}", a, settings.domain_name)
+                },
+                None => settings.domain_name.clone(),
+            };
+            let route_53_resource = if settings.enable_route_53 {
+                let record_set = route53::record_set::CfnRecordSet {
+                    alias_target: route53::record_set::AliasTarget {
+                        dnsname: cfn_resources::get_att(&logical_distr_name, "DomainName").into(),
+                        // this is what you need to use when pointing route53 to cloudfront:
+                        // https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-route53-aliastarget.html#cfn-route53-aliastarget-hostedzoneid
+                        hosted_zone_id: "Z2FDTNDATAQYW2".into(),
+                        ..Default::default()
+                    }.into(),
+                    hosted_zone_name: format!("{}.", settings.domain_name).to_str_val(),
+                    comment: format!("{}", settings.domain_name).to_str_val(),
+                    name: alias.clone().to_str_val().unwrap(),
+                    ..Default::default()
+                };
+                let logical_r53_resource_name = format!("hiragenr53recort{user_mod_name}");
+                let logical_r53_resource_name = logical_r53_resource_name.replace("_", "");
+                let resource = aws_cfn_stack::Resource {
+                    name: logical_r53_resource_name.clone(),
+                    properties: Box::new(record_set) as _,
+                };
+                Some(resource)
+            } else {
+                None
+            };
+            let cert = ViewerCertificate {
+                acm_certificate_arn: Some(settings.acm_arn.clone().into()),
+                ssl_support_method: Some(settings.ssl_support_method.clone()),
+                minimum_protocol_version: Some(settings.minimum_protocol_version.clone()),
+                ..Default::default()
+            };
+            let alias_config: Option<Vec<String>> = Some(vec![alias]);
+            (Some(cert), alias_config, route_53_resource)
+        } else {
+            (None, None, None)
+        };
         let mut distribution = CfnDistribution {
             distribution_config: DistributionConfig {
-                // TODO: allow users adding origins
                 origins: Some(vec![default_origin]),
                 enabled,
+                viewer_certificate,
+                aliases: alias_config,
                 default_cache_behavior: DefaultCacheBehavior {
                     // caching optimized:
                     // https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-cache-policies.html#managed-cache-caching-optimized
@@ -246,13 +361,14 @@ pub mod aws_cloudfront_distribution {
             }
         }
 
-        let logical_distr_name = format!("hiragendist{user_mod_name}");
-        let logical_distr_name = logical_distr_name.replace("_", "");
         let resource = aws_cfn_stack::Resource {
             name: logical_distr_name.clone(),
             properties: Box::new(distribution) as _,
         };
         stackinp.resources.push(resource);
+        if let Some(route53resource) = route53_resource {
+            stackinp.resources.push(route53resource);
+        }
         l0core.set_output("LOGICAL_DISTR_NAME", &logical_distr_name);
     }
 }

@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 cloud_front = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "f903f340a75bcc64f22b63e130874282f3fa56da" }
 cfn_resources = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "f903f340a75bcc64f22b63e130874282f3fa56da" }
+route53 = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "f903f340a75bcc64f22b63e130874282f3fa56da" }
 hira_lib = { path = "../../hira_lib" }
 aws_cfn_stack = { path = "../aws_cfn_stack" }
 hira = { path = "../../hira" }
