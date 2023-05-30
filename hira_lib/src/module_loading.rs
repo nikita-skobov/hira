@@ -590,14 +590,12 @@ impl HiraModule2 {
                     // and ensure that this level 2 module is the same one in its input config
                     for output in self.outputs.iter() {
                         match output {
-                            OutputType::SpecificConst(_, _) => {
-                                return Err(compiler_error(&format!("Detected module {} as {:?}, but in its `mod outputs` section there are const statements. Only Level2 modules can specify const statements in its outputs section", self.name, self.level)));
-                            }
                             OutputType::AllFromModule(mod_name) | OutputType::SpecificFromModule(mod_name, _, _) => {
                                 if mod_name != l2_dependency {
                                     return Err(compiler_error(&format!("Detected module {} as {:?}. Its `mod outputs` section contains use statements from other modules. Expected to only see use statements from Level2 module {}, but found {}. Level3 modules can only specify outputs that exist in the corresponding Level2 module", self.name, self.level, l2_dependency, mod_name)));
                                 }
                             }
+                            _ => {}
                         }
                     }
                 }

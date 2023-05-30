@@ -99,6 +99,7 @@ pub struct L0Core {
     current_module_name: String,
     lvl3_module_name: String,
     crate_name: String,
+    dotenv_location: Option<String>,
 }
 
 #[derive(WasmTypeGen, Debug, Default)]
@@ -470,6 +471,21 @@ impl L0Core {
         self.crate_name = std::env::var("CARGO_CRATE_NAME").unwrap_or("".to_string());
         Ok(())
     }
+    pub fn read_dotenv(base_path: &str, location: &str) -> Result<std::collections::HashMap<String, String>, TokenStream> {
+        let mut path = std::path::PathBuf::from(base_path);
+        path.push(location);
+        let contents = std::fs::read_to_string(&path)
+            .map_err(|e| compiler_error(&format!("Failed to read file '{:?}' as a .env\n{:?}", path, e)))?;
+        let mut map = std::collections::HashMap::new();
+        for line in contents.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("#") { continue; }
+            if let Some((name, val)) = trimmed.split_once("=") {
+                map.insert(name.to_string(), val.to_string());
+            }
+        }
+        Ok(map)
+    }
     pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
         // apply compiler error if any
         if !self.compiler_error_message.is_empty() {
@@ -487,6 +503,18 @@ impl L0Core {
             stream.extend(add_tokens);
         }
 
+        // enables specialized dotenv functionality. unfortunately
+        // due to the way include_str works, we need custom code for this in hira, rather than
+        // making this a lvl2 functionality.
+        // we read the provided file path, and load all env vars into a hashmap.
+        // then we iterate over this module's outputs, and fill the resolved outputs
+        // with the values from the .env file.
+        let mut dotenv_map = if let Some(location) = &self.dotenv_location {
+            Self::read_dotenv(&conf.cargo_directory, location)?
+        } else {
+            Default::default()
+        };
+
         let lvl2_dep_name = module.level3_get_depends_on(module.lvl3_module_depends_on.as_ref())?;
         self.verify_outputs_and_set_defaults(conf, &lvl2_dep_name)?;
         for output in module.outputs.iter() {
@@ -500,10 +528,13 @@ impl L0Core {
                         module.resolved_outputs.insert(key.to_string(), val);
                     }
                 }
-                // shouldnt be possible to set this because
-                // L3 modules cant use specific const outputs
-                // and only L3 modules get apply_changes called on it
-                crate::module_loading::OutputType::SpecificConst(_, _) => unreachable!(),
+                // the only use case for this is lvl3 modules that want their constant outputs
+                // to be filled via a .env file
+                crate::module_loading::OutputType::SpecificConst(key, _) => {
+                    if let Some(val) = dotenv_map.remove(key) {
+                        module.resolved_outputs.insert(key.to_string(), val);
+                    }
+                }
             }
         }
         Ok(())
@@ -592,6 +623,7 @@ impl L0Core {
             current_module_name: Default::default(),
             lvl3_module_name: Default::default(),
             crate_name: Default::default(),
+            dotenv_location: Default::default(),
         }
     }
 
@@ -610,6 +642,16 @@ impl L0Core {
             }
         }
     }
+
+    /// niche function that enables dotenv functionality.
+    /// you point to a file path of where there is a .env file.
+    /// after wasm execution, hira reads this file (relative to CARGO_MANIFEST_DIR)
+    /// and parses it as a .env file and fills all of the lvl3 module's environment variables
+    /// specified in the outputs
+    pub fn set_dotenv_location(&mut self, location: &str) {
+        self.dotenv_location = Some(location.to_string());
+    }
+
     /// this is the name of the user's module where they are referencing your module.
     /// eg: if your module is `my_dependency`, then the user's module name would be `mymod3`
     /// in this example:
