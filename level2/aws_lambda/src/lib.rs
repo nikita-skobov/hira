@@ -103,11 +103,11 @@ pub async fn zip_and_upload_lambda_code(src_path: &str, dest_bucket: &str) -> St
         },
         Err(e) => panic!("Failed to read artifact file {src_path}\n{:?}", e),
     }
+    let hash_str = basic_hash(&file_data);
     let zipped_data = match create_zip_archive(&file_data) {
         Ok(d) => d,
         Err(e) => panic!("Failed to create zip archive for {src_path}\n{:?}", e),
     };
-    let hash_str = basic_hash(&zipped_data);
     let base_name = match src_path.rsplit_once("/") {
         Some((_, right)) => right.to_string(),
         None => "lambdafn".to_string()
