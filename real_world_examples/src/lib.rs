@@ -1,6 +1,21 @@
 use hira::hira;
 use aws_lambda::h_aws_lambda;
+use dotenv_reader::dotenv_reader;
 use ::aws_cloudfront_distribution::lambda_url_distribution;
+
+#[hira]
+pub mod myvars {
+    use super::dotenv_reader;
+
+    pub mod outputs {
+        pub const ACM_ARN: &str = "this will be replaced by the value in the .env file. If not found, this string will be used as the default";
+        pub const MY_DOMAIN: &str = "something.com";
+    }
+
+    pub fn config(inp: &mut dotenv_reader::Input) {
+        inp.dotenv_path = ".env";
+    }
+}
 
 #[hira]
 pub mod my_lambda {
@@ -50,13 +65,23 @@ pub mod other_lambda_fn {
 #[hira]
 pub mod making_my_distr {
     extern crate cfn_resources;
-    
+
+    use super::myvars::outputs::{ACM_ARN, MY_DOMAIN};
     use super::my_lambda::outputs::LOGICAL_FUNCTION_URL_NAME as FIRST_URL;
     use super::other_lambda_fn::outputs::LOGICAL_FUNCTION_URL_NAME as OTHER_URL;
     use super::lambda_url_distribution;
     use self::lambda_url_distribution::LambdaApiEndpoint;
+    use self::lambda_url_distribution::CustomDomainSettings;
 
     pub fn config(distrinput: &mut lambda_url_distribution::Input) {
+        distrinput.custom_domain_settings = Some(
+            CustomDomainSettings {
+                acm_arn: ACM_ARN.to_string(),
+                domain_name: MY_DOMAIN.to_string(),
+                subdomain: Some("hadsadsadsa".to_string()),
+                ..Default::default()
+            }
+        );
         distrinput.endpoints = vec![
             LambdaApiEndpoint { path: "/".into(), function_url_id: FIRST_URL.into() },
             LambdaApiEndpoint { path: "/test".into(), function_url_id: OTHER_URL.into() },

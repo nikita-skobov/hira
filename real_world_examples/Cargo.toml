@@ -12,6 +12,7 @@ serde = { version = "*", features = ["derive"]}
 serde_json = "*"
 
 # our module depends on these other hira modules:
+dotenv_reader = { path = "../level2/dotenv_reader" }
 aws_lambda = { path = "../level2/aws_lambda" }
 aws_cfn_stack = { path = "../level2/aws_cfn_stack" }
 aws_cloudfront_distribution = { path = "../level2/aws_cloudfront_distribution" }
