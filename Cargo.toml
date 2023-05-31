@@ -6,6 +6,7 @@ members = [
     "level2/dotenv_reader",
     "level2/aws_lambda",
     "level2/aws_cfn_stack",
+    "level2/aws_s3",
     "level2/aws_cloudfront_distribution",
 ]
 
