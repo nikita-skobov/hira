@@ -6,9 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-cloud_front = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "f903f340a75bcc64f22b63e130874282f3fa56da" }
-cfn_resources = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "f903f340a75bcc64f22b63e130874282f3fa56da" }
-route53 = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "f903f340a75bcc64f22b63e130874282f3fa56da" }
+cloud_front = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
+cfn_resources = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
+route53 = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
 hira_lib = { path = "../../hira_lib" }
 aws_cfn_stack = { path = "../aws_cfn_stack" }
 hira = { path = "../../hira" }
