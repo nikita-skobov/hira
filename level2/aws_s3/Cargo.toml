@@ -1,0 +1,15 @@
+[package]
+name = "aws_s3"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cfn_resources = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
+s3 = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
+hira_lib = { path = "../../hira_lib" }
+aws_cfn_stack = { path = "../aws_cfn_stack" }
+hira = { path = "../../hira" }
+#serde = { version = "1.0", features = ["derive"]}
+#serde_json = "1.0"
