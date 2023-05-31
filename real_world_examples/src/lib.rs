@@ -1,6 +1,7 @@
 use hira::hira;
 use aws_lambda::h_aws_lambda;
 use dotenv_reader::dotenv_reader;
+use aws_s3::aws_s3;
 use ::aws_cloudfront_distribution::lambda_url_distribution;
 
 #[hira]
@@ -86,5 +87,14 @@ pub mod making_my_distr {
             LambdaApiEndpoint { path: "/".into(), function_url_id: FIRST_URL.into() },
             LambdaApiEndpoint { path: "/test".into(), function_url_id: OTHER_URL.into() },
         ]
+    }
+}
+
+#[hira]
+pub mod my_s3_website {
+    use super::aws_s3;
+
+    pub fn config(inp: &mut aws_s3::Input) {
+        inp.is_website = true;
     }
 }
