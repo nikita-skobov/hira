@@ -2,7 +2,7 @@ use hira::hira;
 use aws_lambda::h_aws_lambda;
 use dotenv_reader::dotenv_reader;
 use aws_s3::aws_s3;
-use ::aws_cloudfront_distribution::lambda_url_distribution;
+use ::aws_cloudfront_distribution::{lambda_url_distribution, s3_website_distribution};
 
 #[hira]
 pub mod myvars {
@@ -94,7 +94,33 @@ pub mod making_my_distr {
 pub mod my_s3_website {
     use super::aws_s3;
 
+    pub mod outputs {
+        pub use super::aws_s3::outputs::*;
+    }
+
     pub fn config(inp: &mut aws_s3::Input) {
         inp.is_website = true;
+    }
+}
+
+#[hira]
+pub mod websitedistr {
+    extern crate cfn_resources;
+
+    use super::myvars::outputs::{ACM_ARN, MY_DOMAIN};
+    use super::my_s3_website::outputs::LOGICAL_BUCKET_NAME;
+    use super::s3_website_distribution;
+    use self::s3_website_distribution::CustomDomainSettings;
+
+    pub fn config(distrinput: &mut s3_website_distribution::Input) {
+        distrinput.custom_domain_settings = Some(
+            CustomDomainSettings {
+                acm_arn: ACM_ARN.to_string(),
+                domain_name: MY_DOMAIN.to_string(),
+                subdomain: Some("hadsadsadsa2".to_string()),
+                ..Default::default()
+            }
+        );
+        distrinput.logical_bucket_website_url = LOGICAL_BUCKET_NAME.to_string();
     }
 }
