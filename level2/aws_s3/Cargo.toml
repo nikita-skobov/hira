@@ -8,6 +8,8 @@ edition = "2021"
 [dependencies]
 cfn_resources = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
 s3 = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
+lambda = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
+iam = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
 hira_lib = { path = "../../hira_lib" }
 aws_cfn_stack = { path = "../aws_cfn_stack" }
 hira = { path = "../../hira" }

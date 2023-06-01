@@ -4,14 +4,20 @@ use aws_cfn_stack::aws_cfn_stack;
 #[hira::hira]
 pub mod aws_s3 {
     extern crate s3;
+    extern crate lambda;
+    extern crate iam;
     extern crate cfn_resources;
+    
     
     use super::L0Core;
     use super::aws_cfn_stack;
+    use self::cfn_resources::get_att;
     use self::cfn_resources::get_ref;
     use self::cfn_resources::create_policy_doc;
     use self::cfn_resources::StrVal;
     use self::cfn_resources::ToOptStrVal;
+    use self::cfn_resources::serde_json;
+    use self::cfn_resources::serde_json::Value;
     pub use self::s3::bucket::CfnBucket;
     pub use self::s3::bucket::WebsiteConfiguration;
 
@@ -21,6 +27,17 @@ pub mod aws_s3 {
 
     #[derive(Default)]
     pub struct Input {
+        /// By default, every s3 bucket gets a cleanup resource created for it.
+        /// this includes:
+        /// - a cloudformation custom resource
+        /// - a lambda function that will perform the cleanup
+        /// - a role for the lambda function that allows it to cleanup the S3 bucket.
+        ///
+        /// this is useful for testing, or applications that are short lived, as the cleanup resource
+        /// allows you to automatically delete the S3 bucket when you delete the stack.
+        /// Without a cleanup resource, deleting a stack with an S3 bucket that is not empty will fail.
+        /// To disable cleanup resources, set this value to true.
+        pub dont_create_cleanup_resources: bool,
         /// if enabled, we turn on website configuration for this bucket
         /// using default settings of index.html as both the error document
         /// and the index document.
@@ -33,6 +50,42 @@ pub mod aws_s3 {
         /// to create the s3 bucket name for you based on the logical resource name.
         /// fill any field that you'd like to customize.
         pub extra_bucket_settings: s3::bucket::CfnBucket,
+    }
+
+    pub fn create_assume_role_policy_doc() -> Value {
+        let mut map = cfn_resources::serde_json::Map::default();
+        map.insert("Version".to_string(), Value::String("2012-10-17".to_string()));
+
+        let mut principal = cfn_resources::serde_json::Map::default();
+        principal.insert("Service".to_string(), Value::String("lambda.amazonaws.com".to_string()));
+
+        let mut statements_out = vec![];
+        let mut statement_obj = cfn_resources::serde_json::Map::default();
+        statement_obj.insert("Effect".to_string(), Value::String("Allow".to_string()));
+        statement_obj.insert("Principal".to_string(), Value::Object(principal));
+        statement_obj.insert("Action".to_string(), Value::String("sts:AssumeRole".to_string()));
+        statements_out.push(Value::Object(statement_obj));
+        map.insert("Statement".to_string(), Value::Array(statements_out));
+        Value::Object(map)
+    }
+
+    pub struct CleanupResource {
+        pub lambda_logical_id: String,
+        pub bucket_logical_id: String,
+    }
+
+    impl cfn_resources::CfnResource for CleanupResource {
+        fn type_string(&self) -> &'static str {
+            "Custom::cleanupbucket"
+        }
+        fn properties(&self) -> Value {
+            let mut map = serde_json::Map::new();
+            let service_token = get_att(&self.lambda_logical_id, "Arn");
+            let bucket_name = get_ref(&self.bucket_logical_id);
+            map.insert("ServiceToken".to_string(), service_token);
+            map.insert("BucketName".to_string(), bucket_name);
+            serde_json::Value::Object(map)
+        }
     }
 
     pub fn config(myinput: &mut Input, stackinp: &mut aws_cfn_stack::Input, l0core: &mut L0Core) {
@@ -85,5 +138,94 @@ pub mod aws_s3 {
         }
 
         l0core.set_output("LOGICAL_BUCKET_NAME", &logical_bucket_name);
+
+        // optionally setup cleanup resources:
+        if myinput.dont_create_cleanup_resources {
+            return;
+        }
+        let mut resource_sub = cfn_resources::serde_json::Map::new();
+        resource_sub.insert("Fn::Sub".to_string(), cfn_resources::serde_json::Value::String(
+            format!("arn:aws:s3:::${{{}}}/*", logical_bucket_name)
+        ));
+        let resource_sub = cfn_resources::serde_json::Value::Object(resource_sub);
+        let policy = iam::role::Policy {
+            policy_name: format!("hira-gen-policy-{user_mod_name}").into(),
+            policy_document: create_policy_doc(&[
+                (
+                    "Allow".to_string(), "s3:ListBucket".to_string(),
+                    StrVal::Val(get_att(&logical_bucket_name, "Arn")),
+                    "".to_str_val().unwrap()
+                ),
+                (
+                    "Allow".to_string(), "s3:DeleteObject".to_string(),
+                    StrVal::Val(resource_sub),
+                    "".to_str_val().unwrap()
+                )
+            ]),
+        };
+        let role_name = format!("hiragenrole{user_mod_name}");
+        let logical_role_name = role_name.replace("_", "");
+        let role = iam::role::CfnRole {
+            description: Some(format!("auto generated cleanup resource for {user_mod_name}").into()),
+            assume_role_policy_document: create_assume_role_policy_doc(),
+            policies: Some(vec![policy]),
+            ..Default::default()
+        };
+        let logical_fn_name = format!("hiragencleanupfunction{user_mod_name}");
+        let logical_fn_name = logical_fn_name.replace("_", "");
+        let cleanup_function = lambda::function::CfnFunction {
+            runtime: lambda::function::FunctionRuntimeEnum::Nodejs16x.into(),
+            handler: "index.handler".to_str_val(),
+            role: get_att(&logical_role_name, "Arn").into(),
+            code: lambda::function::Code {
+                zip_file: r#"
+                var AWS = require('aws-sdk')
+                var response = require('cfn-response')
+                const s3 = new AWS.S3({});
+                async function listObjects(bucketName) {
+                    const data = await s3.listObjects({ Bucket: bucketName }).promise();
+                    const objects = data.Contents;
+                    for (let obj of objects) {
+                        await s3.deleteObject({ Bucket: bucketName, Key: obj.Key }).promise();
+                    }
+                }
+                exports.handler = async function(event, context) {
+                    let responseType = response.SUCCESS
+                    if (event.RequestType == 'Delete') {
+                        try {
+                            await listObjects(event.ResourceProperties.BucketName);
+                        } catch (err) {
+                            responseType = response.FAILED
+                        }
+                    }
+                    await response.send(event, context, responseType)
+                }
+                "#.to_str_val(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let cleanup = CleanupResource {
+            lambda_logical_id: logical_fn_name.clone(),
+            bucket_logical_id: logical_bucket_name.clone(),
+        };
+        let logical_cleanup_resource_name = format!("hiragencustomcleanup{user_mod_name}");
+        let logical_cleanup_resource_name = logical_cleanup_resource_name.replace("_", "");
+        let cleanup_resource = aws_cfn_stack::Resource {
+            name: logical_cleanup_resource_name.into(),
+            properties: Box::new(cleanup) as _,
+        };
+        let function_resource = aws_cfn_stack::Resource {
+            name: logical_fn_name,
+            properties: Box::new(cleanup_function) as _,
+        };
+        let role_resource = aws_cfn_stack::Resource {
+            name: logical_role_name,
+            properties: Box::new(role) as _,
+        };
+        stackinp.resources.push(role_resource);
+        stackinp.resources.push(function_resource);
+        stackinp.resources.push(cleanup_resource);
     }
 }
