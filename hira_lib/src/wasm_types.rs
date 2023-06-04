@@ -71,9 +71,17 @@ pub fn get_wasm_output(
     code: &[(String, String)],
     extern_crates: &[String],
     data_to_pass: &LibraryObj,
+    dont_run_wasm: bool,
+    custom_codegen_opts: Option<Vec<&str>>,
 ) -> Option<LibraryObj> {
     let _ = std::fs::create_dir_all(wasm_out_dir);
-    let out_file = wasm_type_gen::compile_strings_to_wasm_with_extern_crates(code, extern_crates, wasm_out_dir).expect("compilation error");
+    let out_file = wasm_type_gen::compile_strings_to_wasm_with_extern_crates(
+        code, extern_crates,
+        wasm_out_dir, custom_codegen_opts
+    ).expect("compilation error");
+    if dont_run_wasm {
+        return None;
+    }
     let wasm_file = std::fs::read(out_file).expect("failed to read wasm binary");
     let out = run_wasm(&wasm_file, data_to_pass.to_binary_slice()).expect("runtime error running wasm");
     LibraryObj::from_binary_slice(out)
