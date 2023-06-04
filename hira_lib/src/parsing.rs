@@ -307,6 +307,22 @@ pub fn get_list_of_strings(stream: TokenStream) -> Vec<String> {
     out
 }
 
+pub fn has_comment(attributes: &[Attribute], match_str: &str) -> bool {
+    for attr in attributes.iter() {
+        // a doc comment will be reported as #[doc = "..."]
+        // therefore we only check for name value
+        if let Meta::NameValue(nv) = &attr.meta {
+            let s = nv.value.to_token_stream().to_string();
+            if s.contains(match_str) {
+                return true;
+            }
+        }
+
+    }
+
+    false
+}
+
 pub fn has_derive(meta: &Meta, name: &str) -> bool {
     let list = if let Meta::List(l) = meta {
         l

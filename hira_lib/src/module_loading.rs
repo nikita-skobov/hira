@@ -7,7 +7,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens};
 use wasm_type_gen::WasmIncludeString;
 
-use crate::parsing::{remove_surrounding_quotes, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples, is_public, has_derive, parse_module_name_from_use_names};
+use crate::parsing::{remove_surrounding_quotes, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples, is_public, has_derive, parse_module_name_from_use_names, has_comment};
 use crate::{wasm_types::*, level0::*};
 
 
@@ -876,7 +876,11 @@ pub fn set_use_dependencies(module: &mut HiraModule2, item: &mut syn::ItemUse) {
 }
 
 pub fn set_extern_crates(module: &mut HiraModule2, item: &mut syn::ItemExternCrate) {
-    let name = get_ident_string(&item.ident);
+    let convert_underscore = has_comment(&item.attrs, "underscore_to_dash");
+    let mut name = get_ident_string(&item.ident);
+    if convert_underscore {
+        name = name.replace("_", "-");
+    }
     module.extern_crates.push(name);
 }
 
