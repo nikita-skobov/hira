@@ -422,8 +422,12 @@ impl HiraModule2 {
         let include_str = LibraryObj::include_in_rs_wasm();
         let include_str_has = |s: &str| -> bool {
             let check1 = format!("pub struct {s}");
+            let check1_1 = format!("pub struct\n{s}");
+            let check1_2 = format!("pub\nstruct {s}");
             let check2 = format!("pub enum {s}");
-            if include_str.contains(&check1) || include_str.contains(&check2) {
+            let check2_1 = format!("pub enum\n{s}");
+            let check2_2 = format!("pub\nenum {s}");
+            if include_str.contains(&check1) || include_str.contains(&check2) || include_str.contains(&check1_1) || include_str.contains(&check2_1) || include_str.contains(&check1_2) || include_str.contains(&check2_2) {
                 return true;
             }
             false
