@@ -81,7 +81,7 @@ impl HiraConfig {
             existing_data.extend(data);
         }
     }
-    fn new() -> Self {
+    pub fn new() -> Self {
         let mut out = Self::default();
         out.set_directories();
         out.load_cargo_toml();
