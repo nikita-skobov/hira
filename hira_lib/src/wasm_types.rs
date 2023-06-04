@@ -33,6 +33,7 @@ pub struct MapEntry<T> {
 }
 
 #[derive(WasmTypeGen, Debug)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
 pub struct UserInput {
     /// only relevant for input params to a function. not applicable to struct fields.
     pub is_self: bool,
@@ -133,6 +134,62 @@ pub fn get_wasm_code_to_compile_lvl3(
 
     let mod2_calling_code = lvl2module.config_calling_code(conf0.clone());
     let lvl3mod_tokens = TokenStream::from_str(&lvl3module_def).expect("Failed to parse lvl3 module def as tokens");
+
+    if cfg!(feature = "web") {
+        return quote! {
+            extern crate hira_base;
+            extern crate serde_json;
+            extern crate sapp_jsutils;
+            extern crate #dep_crate_name;
+            use hira_base::LibraryObj;
+            use #dep_crate_name::*;
+
+            #lvl3mod_tokens
+
+            fn create_js_obj(typ: &str, err: String) -> sapp_jsutils::JsObject {
+                let mut obj = serde_json::Map::new();
+                obj.insert(typ.to_string(), serde_json::Value::String(err));
+                let val = serde_json::Value::Object(obj);
+                let err_ser = serde_json::to_string(&val).unwrap_or("{\"err\":\"failed to serialize error\"}".to_string());
+                sapp_jsutils::JsObject::string(&err_ser)
+            }
+
+            #[no_mangle]
+            pub extern "C" fn hi_rust_with_string(lib_obj: sapp_jsutils::JsObject, conf0data: sapp_jsutils::JsObject) -> sapp_jsutils::JsObject {
+                let mut lib_obj_str = String::new();
+                lib_obj.to_string(&mut lib_obj_str);
+                let mut conf0data_str = String::new();
+                conf0data.to_string(&mut conf0data_str);
+
+                let mut lib_obj_actual: LibraryObj = match serde_json::from_str(&lib_obj_str) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return create_js_obj("err", format!("Failed to parse {} as LibraryObj\n{:?}", lib_obj_str, e));
+                    }
+                };
+                let library_obj = &mut lib_obj_actual;
+                let mut #conf0 = match serde_json::from_str(&conf0data_str) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return create_js_obj("err", format!("Failed to parse {} as Input\n{:?}", conf0data_str, e));
+                    }
+                };
+                // let mut #conf0 = #mod2name::Input::default();
+                #mod3name::config(&mut #conf0);
+
+                #mod2_calling_code
+
+                match serde_json::to_string(library_obj) {
+                    Ok(s) => {
+                        create_js_obj("ok", s)
+                    }
+                    Err(e) => {
+                        create_js_obj("err", format!("Failed to serialize library obj\n{:?}", e))
+                    }
+                }
+            }
+        };
+    }
 
     quote! {
         extern crate hira_base;
