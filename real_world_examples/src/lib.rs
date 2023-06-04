@@ -14,7 +14,7 @@ pub mod myvars {
     }
 
     pub fn config(inp: &mut dotenv_reader::Input) {
-        inp.dotenv_path = ".env";
+        inp.dotenv_path = ".env".to_string();
     }
 }
 
@@ -65,8 +65,6 @@ pub mod other_lambda_fn {
 
 #[hira]
 pub mod making_my_distr {
-    extern crate cfn_resources;
-
     use super::myvars::outputs::{ACM_ARN, MY_DOMAIN};
     use super::my_lambda::outputs::LOGICAL_FUNCTION_URL_NAME as FIRST_URL;
     use super::other_lambda_fn::outputs::LOGICAL_FUNCTION_URL_NAME as OTHER_URL;
@@ -105,8 +103,6 @@ pub mod my_s3_website {
 
 #[hira]
 pub mod websitedistr {
-    extern crate cfn_resources;
-
     use super::myvars::outputs::{ACM_ARN, MY_DOMAIN};
     use super::my_s3_website::outputs::LOGICAL_BUCKET_NAME;
     use super::s3_website_distribution;
