@@ -8,7 +8,10 @@ use wasm_type_gen::*;
 use crate::{HiraConfig, module_loading::{HiraModule2, OutputType}, parsing::{compiler_error, iterate_mod_def_generic, parse_fn_signature}, wasm_types::{to_map_entry, FunctionSignature}};
 
 
-#[derive(WasmTypeGen, Debug, Default)]
+#[derive(WasmTypeGen, Debug)]
+#[derive(Default)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "web", serde(default))]
 pub struct LibraryObj {
     // pub compiler_error_message: String,
     // pub add_code_after: Vec<String>,
@@ -71,6 +74,7 @@ impl LibraryObj {
 
 
 #[derive(WasmTypeGen, Debug)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
 pub struct SharedOutputEntry {
     pub filename: String,
     pub label: String,
@@ -79,19 +83,25 @@ pub struct SharedOutputEntry {
     pub after: Option<String>,
 }
 
-#[derive(WasmTypeGen, Debug, Default)]
+#[derive(WasmTypeGen, Debug)]
+#[derive(Default)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
 pub struct L0KvReader {
     current_module_name: String,
     data: std::collections::HashMap<String, String>,
 }
 
-#[derive(WasmTypeGen, Debug, Default)]
+#[derive(WasmTypeGen, Debug)]
+#[derive(Default)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
 pub struct L0AppendFile {
     shared_output_data: Vec<SharedOutputEntry>,
     current_module_name: String,
 }
 
-#[derive(WasmTypeGen, Debug, Default)]
+#[derive(WasmTypeGen, Debug)]
+#[derive(Default)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
 pub struct L0Core {
     compiler_error_message: String,
     compiler_warning_message: String,
@@ -102,26 +112,34 @@ pub struct L0Core {
     dotenv_location: Option<String>,
 }
 
-#[derive(WasmTypeGen, Debug, Default)]
+#[derive(WasmTypeGen, Debug)]
+#[derive(Default)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
 pub struct L0CodeReader {
     current_module_name: String,
     function_signatures: std::collections::HashMap<String, FunctionSignature>,
 }
 
-#[derive(WasmTypeGen, Debug, Default)]
+#[derive(WasmTypeGen, Debug)]
+#[derive(Default)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
 pub struct L0CodeWriter {
     current_module_name: String,
     functions: std::collections::HashMap<String, std::collections::HashMap::<String, String>>,
 }
 
-#[derive(WasmTypeGen, Debug, Default)]
+#[derive(WasmTypeGen, Debug)]
+#[derive(Default)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
 pub struct L0RuntimeCreator {
     current_module_name: String,
     runtime_base_path: String,
     runtimes: std::collections::HashMap<String, RuntimeData>,
 }
 
-#[derive(WasmTypeGen, Debug, Default)]
+#[derive(WasmTypeGen, Debug)]
+#[derive(Default)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
 pub struct RuntimeInfo {
     pub creator: String,
     pub code: String,
@@ -130,19 +148,24 @@ pub struct RuntimeInfo {
 }
 
 #[derive(WasmTypeGen, Debug)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
 pub enum CodePosition {
     Beginning,
     End,
 }
 
-#[derive(WasmTypeGen, Debug, Default)]
+#[derive(WasmTypeGen, Debug)]
+#[derive(Default)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
 pub struct RuntimeData {
     pub code_lines: Vec<RuntimeInfo>,
     pub shared_data: Vec<String>,
     pub meta: RuntimeMeta,
 }
 
-#[derive(WasmTypeGen, Debug, Default, Clone)]
+#[derive(WasmTypeGen, Debug, Clone)]
+#[derive(Default)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
 pub struct RuntimeMeta {
     pub cargo_cmd: String,
     pub target: String,

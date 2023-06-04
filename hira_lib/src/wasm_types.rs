@@ -13,7 +13,9 @@ use crate::{
     level0::*,
 };
 
-#[derive(WasmTypeGen, Debug, Default)]
+#[derive(WasmTypeGen, Debug)]
+#[derive(Default)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
 pub struct FunctionSignature {
     pub name: String,
     pub is_pub: bool,
