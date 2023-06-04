@@ -1,0 +1,13 @@
+[package]
+name = "hira_cli"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hira_lib = { path = "../hira_lib", features = ["web"] }
+proc-macro2 = "1.0.52"
+syn = { version = "2", features = ["extra-traits"] }
+quote = "1"
+sapp-jsutils = "0.1"
