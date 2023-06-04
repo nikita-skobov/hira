@@ -17,10 +17,10 @@ use syn::{
     ItemConst,
     ItemMod,
     ItemStruct,
-    Expr, ItemUse, Visibility, token::Pub, ItemExternCrate, Meta, ItemImpl
+    Expr, ItemUse, Visibility, token::Pub, ItemExternCrate, Meta, ItemImpl, Attribute
 };
 
-use crate::{module_loading::{HiraModule2, ModuleLevel}, wasm_types::{FunctionSignature, UserInput}, HiraConfig};
+use crate::{module_loading::{HiraModule2, ModuleLevel, parse_module_from_stream}, wasm_types::{FunctionSignature, UserInput}, HiraConfig};
 
 pub fn default_stream() -> TokenStream {
     compiler_error("Failed to get hira config")
@@ -455,6 +455,19 @@ impl DependencyConfig {
     }
 }
 
+/// given the full file contents, iterate it as a syn::File and
+/// call the callback for every Module we encounter
+pub fn iter_hira_modules(contents: &str, cb: &mut impl FnMut(ItemMod)) -> Result<(), TokenStream> {
+    let synfile = syn::parse_file(contents)
+        .map_err(|e| compiler_error(&format!("Failed to parse as rust file\n{}", e)))?;
+    for item in synfile.items {
+        if let Item::Mod(x) = item {
+            cb(x);
+        }
+    }
+    Ok(())
+}
+
 pub fn fill_dependency_config(hira_conf: &HiraConfig, name: &str, dep_contents: &mut Vec<TokenStream>) -> Result<DependencyConfig, TokenStream> {
     let dep_module = hira_conf.get_mod2(name)
         .ok_or(compiler_error(&format!("Failed to find module {}, but this module has not been loaded yet", name)))?;
@@ -483,6 +496,13 @@ pub fn fill_dependency_config(hira_conf: &HiraConfig, name: &str, dep_contents: 
         out.deps.push(dep_type);
     }
     Ok(out)
+}
+
+/// convenience function for testing. simply calls `parse_module_from_stream` underneath
+pub fn parse_module_from_string<S: AsRef<str>>(s: S) -> Result<HiraModule2, TokenStream> {
+    let stream = s.as_ref().parse::<TokenStream>()
+        .map_err(|e| compiler_error(&format!("Failed to parse string as token stream {:?}", e)))?;
+    parse_module_from_stream(stream)
 }
 
 #[cfg(test)]
