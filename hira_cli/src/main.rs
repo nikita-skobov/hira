@@ -18,9 +18,11 @@ fn main() {
 
     let curr_dir = std::env::current_dir().expect("Failed to get current dir");
     let curr_dir = curr_dir.to_string_lossy().to_string();
+    let home = env!("CARGO_HOME");
     // this depends on some env vars. this whole thing is a hack so im not gonna
     // set all of them, but just the ones i think matter
     std::env::set_var("CARGO_MANIFEST_DIR", curr_dir);
+    std::env::set_var("CARGO_HOME", home);
     let mut conf = hira_lib::HiraConfig::new();
 
     // this produces as small wasm files as possible. useful for web.
