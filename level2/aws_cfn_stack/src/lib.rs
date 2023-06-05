@@ -258,11 +258,13 @@ pub mod aws_cfn_stack {
     }
 
     #[derive(Default)]
+    #[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
     pub struct Input {
         /// if left empty (default), we set the stack name to `hira-gen-default-stack`
         /// Optionally, provide a stack name of your own. You can group resources into 1 stack by ensuring
         /// all of the stack names are the same.
         pub stack_name: String,
+        #[cfg_attr(feature = "web", serde(skip))]
         pub resources: Vec<Resource>,
         /// a list of function invocations that should be ran
         /// prior to deploying the stack.

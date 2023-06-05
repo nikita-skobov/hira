@@ -1,136 +1,8 @@
 use hira_lib::level0::*;
 use aws_cfn_stack::aws_cfn_stack;
 
-/// a higher level construct for creating a cloudfront distribution
-/// that points to lambda function URLs, where each lambda is a separate
-/// origin.
-#[hira::hira]
-pub mod lambda_url_distribution {
-    extern crate cloud_front;
-    extern crate cfn_resources;
-
-    
-    use super::L0Core;
-    use super::aws_cloudfront_distribution;
-    use self::cfn_resources::ToOptStrVal;
-
-    pub use self::aws_cloudfront_distribution::CustomDomainSettings;
-    pub use self::cloud_front::distribution::Origin;
-    pub use self::cloud_front::distribution::CfnDistribution;
-    pub use self::cloud_front::distribution::CustomOriginConfig;
-    pub use self::cloud_front::distribution::DistributionConfig;
-    pub use self::cloud_front::distribution::DefaultCacheBehavior;
-    pub use self::cloud_front::distribution::CacheBehavior;
-    pub use self::cloud_front::distribution::CustomOriginConfigOriginProtocolPolicyEnum;
-    pub use self::cloud_front::distribution::DefaultCacheBehaviorViewerProtocolPolicyEnum;
-
-    /// represents one origin in your distribution.
-    /// path is the URL path that will map to your lambda function.
-    #[derive(Default)]
-    pub struct LambdaApiEndpoint {
-        pub path: String,
-        /// The logical id of the lambda function URL that you'd like to point to.
-        /// internally, we reference this logical id in order to retrieve the actual function URL.
-        pub function_url_id: String,
-    }
-
-    #[derive(Default)]
-    pub struct Input {
-        /// at least one of your endpoints must have path = "/".
-        /// this represents the default endpoint.
-        /// all endpoints paths must be unique.
-        pub endpoints: Vec<LambdaApiEndpoint>,
-
-        /// optionally provide settings to configure your distribution with a custom domain name + https cert
-        pub custom_domain_settings: Option<CustomDomainSettings>,
-    }
-
-    pub fn config(inp: &mut Input, distrinput: &mut aws_cloudfront_distribution::Input, l0core: &mut L0Core) {
-        let mut default = None;
-        let mut other_endpoints: Vec<LambdaApiEndpoint> = vec![];
-        for endpoint in inp.endpoints.drain(..) {
-            if endpoint.path == "/" {
-                default = Some(endpoint);
-            } else {
-                if other_endpoints.iter().any(|x| x.path == endpoint.path) {
-                    l0core.compiler_error(&format!("Lambda API distribution received duplicate endpoint path {}. All paths in a distribution must be unique", endpoint.path));
-                    return;
-                }
-                other_endpoints.push(endpoint);
-            }
-        }
-        let default = if let Some(d) = default {
-            d
-        } else {
-            l0core.compiler_error("Lambda API distribution missing a default endpoint. Must provide an endpoint where path = '/'");
-            return;
-        };
-
-        distrinput.default_origin_domain_name = aws_cloudfront_distribution::select_function_url(&default.function_url_id);
-        distrinput.default_origin_protocol_policy = CustomOriginConfigOriginProtocolPolicyEnum::Httpsonly;
-        distrinput.custom_domain_settings = inp.custom_domain_settings.clone();
-
-        let mut extra_origins = vec![];
-        for (i, endpoint) in other_endpoints.iter().enumerate() {
-            let mut origin = Origin::default();
-            let mut behavior = CacheBehavior::default();
-            origin.id = format!("extraorigin{i}").into();
-            origin.domain_name = aws_cloudfront_distribution::select_function_url(&endpoint.function_url_id);
-            origin.custom_origin_config = Some(CustomOriginConfig {
-                origin_protocol_policy: CustomOriginConfigOriginProtocolPolicyEnum::Httpsonly,
-                // TODO: would this need any customizability for lambda functions?
-                ..Default::default()
-            });
-            behavior.path_pattern = endpoint.path.clone().into();
-            behavior.target_origin_id = origin.id.clone();
-            behavior.cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6".to_str_val();
-            // TODO: behavior customizability?
-            extra_origins.push((origin, behavior));
-        }
-        distrinput.extra_origins = extra_origins;
-    }
-}
-
-
-/// a higher level construct for creating a cloudfront distribution
-/// that points to lambda function URLs, where each lambda is a separate
-/// origin.
-#[hira::hira]
-pub mod s3_website_distribution {
-    extern crate cloud_front;
-    extern crate cfn_resources;
-
-    use super::L0Core;
-    use super::aws_cloudfront_distribution;
-    // use self::cfn_resources::ToOptStrVal;
-    pub use self::aws_cloudfront_distribution::CustomDomainSettings;
-    pub use self::cloud_front::distribution::Origin;
-    pub use self::cloud_front::distribution::CfnDistribution;
-    pub use self::cloud_front::distribution::CustomOriginConfig;
-    pub use self::cloud_front::distribution::DistributionConfig;
-    pub use self::cloud_front::distribution::DefaultCacheBehavior;
-    pub use self::cloud_front::distribution::CacheBehavior;
-    pub use self::cloud_front::distribution::CustomOriginConfigOriginProtocolPolicyEnum;
-    pub use self::cloud_front::distribution::DefaultCacheBehaviorViewerProtocolPolicyEnum;
-
-
-    #[derive(Default)]
-    pub struct Input {
-        /// this should be the logical id of the s3 bucket that is setup as a website.
-        /// internally, we convert this to be:
-        /// { "Fn::Select" : [ "2", { "Fn::Split": ["/", { "Fn::GetAtt": ["logical_bucket_website_url", "WebsiteURL"] }] } ] }
-        pub logical_bucket_website_url: String,
-
-        /// optionally provide settings to configure your distribution with a custom domain name + https cert
-        pub custom_domain_settings: Option<CustomDomainSettings>,
-    }
-
-    pub fn config(inp: &mut Input, distrinput: &mut aws_cloudfront_distribution::Input, _l0core: &mut L0Core) {
-        distrinput.default_origin_domain_name = aws_cloudfront_distribution::select_s3website_url(&inp.logical_bucket_website_url);
-        distrinput.default_origin_protocol_policy = CustomOriginConfigOriginProtocolPolicyEnum::Httponly;
-        distrinput.custom_domain_settings = inp.custom_domain_settings.clone();
-    }
-}
+pub mod s3_website_distribution;
+pub mod lambda_url_distribution;
 
 #[hira::hira]
 pub mod aws_cloudfront_distribution {
@@ -178,6 +50,7 @@ pub mod aws_cloudfront_distribution {
     }
 
     #[derive(Clone)]
+    #[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
     pub struct CustomDomainSettings {
         /// required. will error if not provided.
         pub acm_arn: String,
@@ -213,6 +86,7 @@ pub mod aws_cloudfront_distribution {
         }
     }
 
+    #[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
     pub struct Input {
         /// by default we create the distribution enabled and ready to use.
         /// optionally set this field to true to create the distribution

@@ -257,6 +257,7 @@ pub mod h_aws_lambda {
         Value::Object(map)
     }
 
+    #[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
     pub enum Arch {
         Arm64,
         X86,
@@ -275,6 +276,7 @@ pub mod h_aws_lambda {
     }
 
     #[derive(Default)]
+    #[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
     pub struct Input {
         /// by default, we add policy statements to the lambda's execution role to allow
         /// it to log to cloudwatch. if you'd like to disable cloudwatch logging, set

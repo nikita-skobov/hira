@@ -26,6 +26,7 @@ pub mod aws_s3 {
     }
 
     #[derive(Default)]
+    #[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
     pub struct Input {
         /// By default, every s3 bucket gets a cleanup resource created for it.
         /// this includes:

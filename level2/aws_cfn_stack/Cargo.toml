@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-cfn_resources = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
+cfn_resources = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "66daeace6fbf11761026201728131bd9c668210b" }
 hira_lib = { path = "../../hira_lib" }
 hira = { path = "../../hira" }
 aws-config = "0.55.2"
@@ -14,3 +14,4 @@ aws-sdk-cloudformation = "0.27.0"
 serde = { version = "1.0", features = ["derive"]}
 serde_json = "1.0"
 tokio = { version = "*", features = ["full"]}
+sapp-jsutils = "0.1"

@@ -6,10 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-cfn_resources = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
-lambda = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
-s3 = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
-iam = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
+cfn_resources = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "66daeace6fbf11761026201728131bd9c668210b" }
+lambda = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "66daeace6fbf11761026201728131bd9c668210b" }
+s3 = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "66daeace6fbf11761026201728131bd9c668210b" }
+iam = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "66daeace6fbf11761026201728131bd9c668210b" }
 hira_lib = { path = "../../hira_lib" }
 aws_cfn_stack = { path = "../aws_cfn_stack" }
 hira = { path = "../../hira" }
@@ -21,3 +21,4 @@ aws-sdk-s3 = "0.27.0"
 tokio = { version = "*", features = ["full"]}
 zip = "0.6.6"
 adler = "1.0.2"
+sapp-jsutils = "0.1"
