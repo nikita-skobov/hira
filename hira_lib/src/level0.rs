@@ -438,7 +438,7 @@ impl L0Core {
                 self.module_outputs.insert(dep_name.to_string(), Default::default());
             }
             let mut insert = vec![];
-            for output in module.outputs.iter() {
+            for (_, output) in module.outputs.iter() {
                 match output {
                     OutputType::AllFromModule(mod_name) => {
                         self.set_defaults_recursively(conf, mod_name);
@@ -540,7 +540,7 @@ impl L0Core {
 
         let lvl2_dep_name = module.level3_get_depends_on(module.lvl3_module_depends_on.as_ref())?;
         self.verify_outputs_and_set_defaults(conf, &lvl2_dep_name)?;
-        for output in module.outputs.iter() {
+        for (_, output) in module.outputs.iter() {
             match output {
                 crate::module_loading::OutputType::AllFromModule(other_module_name) => {
                     self.drain_outputs_into(&other_module_name, &mut module.resolved_outputs);

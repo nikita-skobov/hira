@@ -1208,4 +1208,64 @@ pub mod e2e_tests {
         assert_eq!(module.resolved_outputs["A1"], "hey!");
         assert_eq!(module.resolved_outputs["A2"], "lvlv2moda2");
     }
+
+    #[test]
+    fn mod2_can_parse_documentation() {
+        let code = [
+            stringify!(
+                pub mod innerdep {
+                    #[derive(Default)]
+                    pub struct Input {}
+                    pub mod outputs {
+                        /// doc for A
+                        pub const A: &str = "A";
+                    }
+                    pub fn config(inp: &mut Input) {}
+                }
+            ),
+            stringify!(
+                /// this is the documentation
+                /// for my lvl2 module
+                pub mod lvl2mod {
+                    use super::L0CodeReader;
+                    use super::innerdep;
+
+                    pub mod outputs {
+                        /// outputs can be documented too.
+                        pub const HELLO: &str = "aaa";
+                        use super::innerdep::outputs::*;
+                    }
+
+                    /// i document my input here
+                    #[derive(Default)]
+                    pub struct Input {
+                        /// fields can have documentation too.
+                        pub unused: bool,
+                    }
+                    pub fn config(input: &mut Input, inner: &mut innerdep::Input, l0: &mut L0CodeReader) {}
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let conf = e2e_module2_run(&code,|_| {}).expect("Failed to compile");
+        let module = conf.get_mod2("lvl2mod").expect("Failed to find mylevel3mod");
+        assert_eq!(module.name, "lvl2mod");
+        assert_eq!(module.documentation, "this is the documentation for my lvl2 module");
+        assert_eq!(module.input_documentation, "i document my input here");
+        assert_eq!(module.input_definition.len(), 1);
+        assert_eq!(module.input_definition["unused"].documentation, "fields can have documentation too.");
+        assert_eq!(module.input_definition["unused"].ty, "bool");
+        let mut outputs = HashMap::new();
+        module.get_all_output_docs(&conf, &mut outputs).expect("Failed to find outputs");
+        assert_eq!(outputs.len(), 2);
+        assert_eq!(outputs["HELLO"].default, "aaa");
+        assert_eq!(outputs["HELLO"].documentation, "outputs can be documented too.");
+        assert_eq!(outputs["A"].documentation, "doc for A");
+        assert_eq!(outputs["A"].default, "A");
+    }
 }

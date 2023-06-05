@@ -7,7 +7,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens};
 use wasm_type_gen::WasmIncludeString;
 
-use crate::parsing::{remove_surrounding_quotes, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples, is_public, has_derive, parse_module_name_from_use_names, has_comment};
+use crate::parsing::{remove_surrounding_quotes, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples, is_public, has_derive, parse_module_name_from_use_names, has_comment, parse_documentation_from_attributes, iter_fields};
 use crate::{wasm_types::*, level0::*};
 
 
@@ -40,6 +40,14 @@ impl Default for ModuleLevel {
     }
 }
 
+/// a model representing the final state of an output.
+/// has a default value, and a documentation string.
+/// type is always assumed to be string.
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct Output {
+    pub documentation: String,
+    pub default: String,
+}
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum OutputType {
@@ -73,14 +81,24 @@ pub enum OutputType {
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]
+pub struct InputDef {
+    pub ty: String,
+    pub documentation: String,
+}
+
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub struct HiraModule2 {
     pub name: String,
+    /// the documentation comment above the module.
+    pub documentation: String,
     pub contents: String,
     pub config_fn_is_pub: bool,
     pub config_fn_signature_inputs: Vec<String>,
     pub is_pub: bool,
     pub input_struct_has_default: bool,
     pub input_struct: String,
+    pub input_documentation: String,
+    pub input_definition: HashMap<String, InputDef>,
     pub level: ModuleLevel,
     pub errors_during_parsing: Vec<String>,
 
@@ -118,8 +136,9 @@ pub struct HiraModule2 {
     /// Outputs must be statically defined, ie: specific fields w/ names and types
     /// therefore something like "use X::*" must ensure that X can be resolved at
     /// the time we are processing this module, failure to resolve results in
-    /// a compilation failure
-    pub outputs: Vec<OutputType>,
+    /// a compilation failure.
+    /// the first part of the tuple is the documentation for this output
+    pub outputs: Vec<(String, OutputType)>,
 
     /// after the wasm module runs, we have the final output key/values.
     /// we set these in memory such that other modules that depend on these values can
@@ -195,7 +214,7 @@ impl HiraModule2 {
     }
 
     pub fn has_output(&self, k: &str, conf: &HiraConfig) -> bool {
-        for output in self.outputs.iter() {
+        for (_, output) in self.outputs.iter() {
             match output {
                 OutputType::SpecificConst(c, _) => {
                     if c == k { return true }
@@ -241,6 +260,32 @@ impl HiraModule2 {
             compiler_error(&format!("Detected {} as {:?}, but failed to find a level2 module's input in the config function signature", self.name, self.level))
         })?;
         Ok(l2_dep_name.to_string())
+    }
+
+    /// returns all the output names, their default values, and their documentation
+    pub fn get_all_output_docs(&self, conf: &HiraConfig, fill: &mut HashMap<String, Output>) -> Result<(), TokenStream> {
+        for (output_doc, output) in self.outputs.iter() {
+            match output {
+                OutputType::AllFromModule(other_mod_name) => {
+                    let other_mod = conf.get_mod2(&other_mod_name).ok_or(compiler_error(&format!("Failed to load module '{}' while getting outputs for '{}'", other_mod_name, self.name)))?;
+                    other_mod.get_all_output_docs(conf, fill)?;
+                }
+                OutputType::SpecificFromModule(other_mod_name, field_name, _) => {
+                    let other_mod = conf.get_mod2(&other_mod_name).ok_or(compiler_error(&format!("Failed to load module '{}' while getting outputs for '{}'", other_mod_name, self.name)))?;
+                    let mut inner = HashMap::new();
+                    other_mod.get_all_output_docs(conf, &mut inner)?;
+                    if let Some(field) = inner.get(field_name) {
+                        fill.insert(field_name.to_string(), field.clone());
+                    } else {
+                        return Err(compiler_error(&format!("Module '{}' uses specific output '{}' from '{}' but no such output was found", self.name, field_name, other_mod_name)));
+                    }
+                }
+                OutputType::SpecificConst(name, default) => {
+                    fill.insert(name.to_string(), Output { documentation: output_doc.to_string(), default: default.to_string() });
+                }
+            }
+        }
+        Ok(())
     }
 
     /// given a level2 module ,iterate through all its dependencies
@@ -332,7 +377,7 @@ impl HiraModule2 {
                         // all the static ones, and then iterate over the evaluated ones and overwrite
                         // any that have changed.
                         let mut final_outputs = HashMap::new();
-                        for output in mod_conf.outputs.iter() {
+                        for (_, output) in mod_conf.outputs.iter() {
                             match output {
                                 // TODO: should recurse or not?
                                 // OutputType::AllFromModule(_) => todo!(),
@@ -364,7 +409,7 @@ impl HiraModule2 {
                 OutputType::SpecificFromModule(mod_name, specific_key, renamed) => {
                     if let Some(mod_conf) = conf.get_mod2(&mod_name) {
                         let mut final_outputs = HashMap::new();
-                        for output in mod_conf.outputs.iter() {
+                        for (_, output) in mod_conf.outputs.iter() {
                             match output {
                                 // TODO: should recurse or not?
                                 // OutputType::AllFromModule(_) => todo!(),
@@ -592,7 +637,7 @@ impl HiraModule2 {
                     // ensure L3 modules can only specify use statements
                     // also ensure that L3 module outputs only depend on 1 level 2 module
                     // and ensure that this level 2 module is the same one in its input config
-                    for output in self.outputs.iter() {
+                    for (_, output) in self.outputs.iter() {
                         match output {
                             OutputType::AllFromModule(mod_name) | OutputType::SpecificFromModule(mod_name, _, _) => {
                                 if mod_name != l2_dependency {
@@ -782,12 +827,18 @@ pub fn set_capability_params(module: &mut HiraModule2, item: &mut syn::ItemConst
 
 pub fn set_input_item_struct(module: &mut HiraModule2, item: &mut syn::ItemStruct) {
     let struct_name = get_ident_string(&item.ident);
-    if struct_name == "Input" {
-        if item.attrs.iter().any(|att| has_derive(&att.meta, "Default")) {
-            module.input_struct_has_default = true;
-        }
-        module.input_struct = item.to_token_stream().to_string();
+    if struct_name != "Input" {
+        return;
     }
+    let doc = parse_documentation_from_attributes(&item.attrs);
+    module.input_documentation = doc;
+    if item.attrs.iter().any(|att| has_derive(&att.meta, "Default")) {
+        module.input_struct_has_default = true;
+    }
+    iter_fields(&item.fields, &mut |name, ty, documentation| {
+        module.input_definition.insert(name, InputDef { ty, documentation });
+    });
+    module.input_struct = item.to_token_stream().to_string();
 }
 
 pub fn check_for_default_impl(module: &mut HiraModule2, item: &mut syn::ItemImpl) {
@@ -916,11 +967,12 @@ pub fn set_outputs(module: &mut HiraModule2, item: &mut syn::ItemMod) {
     let mut default_vec = vec![];
     for item in item.content.as_mut().map(|x| &mut x.1).unwrap_or(&mut default_vec) {
         if let syn::Item::Const(c) = item {
+            let doc = parse_documentation_from_attributes(&c.attrs);
             let name = get_ident_string(&c.ident);
             // TODO: actually check the type.. we should enforce that its a string.
             let mut val = c.expr.to_token_stream().to_string();
             remove_surrounding_quotes(&mut val);
-            module.outputs.push(OutputType::SpecificConst(name, val));
+            module.outputs.push((doc.to_string(), OutputType::SpecificConst(name, val)));
             continue;
         }
         if let syn::Item::Use(u) = item {
@@ -932,14 +984,14 @@ pub fn set_outputs(module: &mut HiraModule2, item: &mut syn::ItemMod) {
                 };
                 match (wildcard, specific_import) {
                     (true, _) => {
-                        module.outputs.push(OutputType::AllFromModule(mod_name.to_string()));
+                        module.outputs.push(("".to_string(), OutputType::AllFromModule(mod_name.to_string())));
                     }
                     (false, None) => {
                         // this corresponds to "use other_module::outputs"
                         // this shouldnt be allowed in this context. so we just ignore it.
                     }
                     (false, Some(specific)) => {
-                        module.outputs.push(OutputType::SpecificFromModule(mod_name.to_string(), specific.to_string(), renamed));
+                        module.outputs.push(("".to_string(), OutputType::SpecificFromModule(mod_name.to_string(), specific.to_string(), renamed)));
                     }
                 }
             });
@@ -950,6 +1002,8 @@ pub fn set_outputs(module: &mut HiraModule2, item: &mut syn::ItemMod) {
 pub fn parse_module_from_stream(stream: TokenStream) -> Result<HiraModule2, TokenStream> {
     let mut mod_def = parse_as_module_item(stream)?;
     let mut hira_mod = HiraModule2::default();
+    let doc = parse_documentation_from_attributes(&mod_def.attrs);
+    hira_mod.documentation = doc;
     iterate_mod_def(
         &mut hira_mod,
         &mut mod_def,
@@ -1173,7 +1227,7 @@ mod tests {
         assert_eq!(module.fill_outputs.len(), 1);
         assert_eq!(module.fill_outputs[0], OutputType::SpecificFromModule("some_module".to_string(), "THING".to_string(), None));
         let mut some_module = HiraModule2::default();
-        some_module.outputs.push(OutputType::SpecificConst("THING".to_string(), "hello".to_string()));
+        some_module.outputs.push(("".to_string(), OutputType::SpecificConst("THING".to_string(), "hello".to_string())));
         conf.modules2.insert("some_module".to_string(), some_module);
         let out = module.insert_evaluated_outputs(&conf);
         assert!(out.is_ok());
@@ -1207,8 +1261,8 @@ mod tests {
         assert_eq!(module.fill_outputs.len(), 1);
         assert_eq!(module.fill_outputs[0], OutputType::AllFromModule("some_module".to_string()));
         let mut some_module = HiraModule2::default();
-        some_module.outputs.push(OutputType::SpecificConst("THING".to_string(), "hello".to_string()));
-        some_module.outputs.push(OutputType::SpecificConst("OVERRIDE".to_string(), "a".to_string()));
+        some_module.outputs.push(("".to_string(), OutputType::SpecificConst("THING".to_string(), "hello".to_string())));
+        some_module.outputs.push(("".to_string(), OutputType::SpecificConst("OVERRIDE".to_string(), "a".to_string())));
         some_module.resolved_outputs.insert("OVERRIDE".to_string(), "b".to_string());
         conf.modules2.insert("some_module".to_string(), some_module);
         let out = module.insert_evaluated_outputs(&conf);
@@ -1535,8 +1589,8 @@ mod tests {
         "#;
         let stream = TokenStream::from_str(code).expect("Failed to parse test case as token stream");
         let module = parse_module_from_stream(stream).expect("failed to parse test case as module");
-        assert_eq!(module.outputs[0], OutputType::SpecificFromModule("something".to_string(), "specific".to_string(), None));
-        assert_eq!(module.outputs[1], OutputType::AllFromModule("apples".to_string()));
-        assert_eq!(module.outputs[2], OutputType::SpecificConst("HELLO".to_string(), "dsa".to_string()));
+        assert_eq!(module.outputs[0].1, OutputType::SpecificFromModule("something".to_string(), "specific".to_string(), None));
+        assert_eq!(module.outputs[1].1, OutputType::AllFromModule("apples".to_string()));
+        assert_eq!(module.outputs[2].1, OutputType::SpecificConst("HELLO".to_string(), "dsa".to_string()));
     }
 }

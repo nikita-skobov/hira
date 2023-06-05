@@ -8,7 +8,7 @@ use serde::{Serialize, Deserialize};
 
 use proc_macro2::{
     TokenStream,
-    TokenTree, Ident,
+    TokenTree, Ident, Span,
 };
 use quote::{quote, ToTokens, format_ident};
 use syn::{
@@ -17,7 +17,7 @@ use syn::{
     ItemConst,
     ItemMod,
     ItemStruct,
-    Expr, ItemUse, Visibility, token::Pub, ItemExternCrate, Meta, ItemImpl, Attribute
+    Expr, ItemUse, Visibility, token::Pub, ItemExternCrate, Meta, ItemImpl, Attribute, Fields
 };
 
 use crate::{module_loading::{HiraModule2, ModuleLevel, parse_module_from_stream}, wasm_types::{FunctionSignature, UserInput}, HiraConfig};
@@ -470,6 +470,43 @@ pub fn iter_hira_modules(contents: &str, cb: &mut impl FnMut(ItemMod)) -> Result
         }
     }
     Ok(())
+}
+
+pub fn ident_contains(id: &Ident, match_str: &str) -> bool {
+    let s = get_ident_string(id);
+    s.contains(match_str)
+}
+
+pub fn parse_documentation_from_attributes(attrs: &[Attribute]) -> String {
+    let mut out = "".to_string();
+    for att in attrs.iter() {
+        if let Meta::NameValue(nv) = &att.meta {
+            if !nv.path.segments.iter().any(|s| ident_contains(&s.ident, "doc")) {
+                continue;
+            }
+            if let Expr::Lit(l) = &nv.value {
+                if let syn::Lit::Str(s) = &l.lit {
+                    let mut st = s.token().to_string();
+                    remove_surrounding_quotes(&mut st);
+                    out.push_str(&st);
+                }
+            }
+        }
+    }
+    out.trim().to_string()
+}
+
+/// callback takes: field name, field type, field documentation
+pub fn iter_fields(fields: &Fields, cb: &mut impl FnMut(String, String, String)) {
+    let default_ident = Ident::new("a", Span::call_site());
+    for field in fields.iter() {
+        let ident = field.ident.as_ref().unwrap_or(&default_ident);
+        let name = get_ident_string(&ident);
+        let mut typ = field.ty.to_token_stream().to_string();
+        remove_surrounding_quotes(&mut typ);
+        let doc = parse_documentation_from_attributes(&field.attrs);
+        cb(name, typ, doc);
+    }
 }
 
 pub fn fill_dependency_config(hira_conf: &HiraConfig, name: &str, dep_contents: &mut Vec<TokenStream>) -> Result<DependencyConfig, TokenStream> {
