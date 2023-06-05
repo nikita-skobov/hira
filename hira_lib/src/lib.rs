@@ -58,7 +58,7 @@ pub struct HiraConfig {
 }
 
 impl HiraConfig {
-    fn get_mod2(&self, name: &str) -> Option<&module_loading::HiraModule2> {
+    pub fn get_mod2(&self, name: &str) -> Option<&module_loading::HiraModule2> {
         self.modules2.get(name)
     }
     fn add_to_runtime(&mut self, runtime_name: String, meta: RuntimeMeta, runtime_code: String, unique_code: bool) {
