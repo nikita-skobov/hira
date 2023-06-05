@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 hira_lib = { path = "../../hira_lib" }
 hira = { path = "../../hira" }
+sapp-jsutils = "0.1"
