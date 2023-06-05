@@ -462,6 +462,10 @@ pub fn iter_hira_modules(contents: &str, cb: &mut impl FnMut(ItemMod)) -> Result
         .map_err(|e| compiler_error(&format!("Failed to parse as rust file\n{}", e)))?;
     for item in synfile.items {
         if let Item::Mod(x) = item {
+            // skip mod imports, we only care about mod definitions
+            if x.content.is_none() {
+                continue;
+            }
             cb(x);
         }
     }

@@ -91,7 +91,7 @@ pub fn get_wasm_output(
 
 pub fn get_wasm_code_to_compile2(
     hira_conf: &HiraConfig,
-    hira_module_lvl3: &HiraModule2
+    hira_module_lvl3: &HiraModule2,
 ) -> Result<[(String, String); 3], TokenStream> {
     let dependency_name = format!("dependencies_{}", hira_module_lvl3.name);
     let mut dependency_mod_defs = vec![];
@@ -155,7 +155,20 @@ pub fn get_wasm_code_to_compile_lvl3(
             }
 
             #[no_mangle]
-            pub extern "C" fn hi_rust_with_string(lib_obj: sapp_jsutils::JsObject, conf0data: sapp_jsutils::JsObject) -> sapp_jsutils::JsObject {
+            pub extern "C" fn get_module_default() -> sapp_jsutils::JsObject {
+                let default_conf = #mod2name::Input::default();
+                match serde_json::to_string(&default_conf) {
+                    Ok(s) => {
+                        create_js_obj("ok", s)
+                    }
+                    Err(e) => {
+                        create_js_obj("err", format!("Failed to serialize default Input\n{:?}", e))
+                    }
+                }
+            }
+
+            #[no_mangle]
+            pub extern "C" fn run_module_config(lib_obj: sapp_jsutils::JsObject, conf0data: sapp_jsutils::JsObject) -> sapp_jsutils::JsObject {
                 let mut lib_obj_str = String::new();
                 lib_obj.to_string(&mut lib_obj_str);
                 let mut conf0data_str = String::new();
