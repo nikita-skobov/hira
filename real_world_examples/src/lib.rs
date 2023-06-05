@@ -2,7 +2,7 @@ use hira::hira;
 use aws_lambda::h_aws_lambda;
 use dotenv_reader::dotenv_reader;
 use aws_s3::aws_s3;
-use ::aws_cloudfront_distribution::{lambda_url_distribution, s3_website_distribution};
+use ::aws_cloudfront_distribution::{lambda_url_distribution::lambda_url_distribution, s3_website_distribution::s3_website_distribution};
 
 #[hira]
 pub mod myvars {

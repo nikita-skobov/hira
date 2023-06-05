@@ -19,6 +19,6 @@ aws_s3 = { path = "../level2/aws_s3" }
 aws_cloudfront_distribution = { path = "../level2/aws_cloudfront_distribution" }
 
 # third party dependencies can be added via extern crate:
-iam = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
-cloud_front = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
-cfn_resources = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "99398fb19ca6a6cba23d922c82d58e572d1ea6b9" }
+iam = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "66daeace6fbf11761026201728131bd9c668210b" }
+cloud_front = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "66daeace6fbf11761026201728131bd9c668210b" }
+cfn_resources = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "66daeace6fbf11761026201728131bd9c668210b" }
