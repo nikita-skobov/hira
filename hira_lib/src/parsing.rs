@@ -457,7 +457,7 @@ impl DependencyConfig {
 
 /// given the full file contents, iterate it as a syn::File and
 /// call the callback for every Module we encounter
-pub fn iter_hira_modules(contents: &str, cb: &mut impl FnMut(ItemMod)) -> Result<(), TokenStream> {
+pub fn iter_hira_modules(contents: &str, cb: &mut impl FnMut(ItemMod) -> Result<bool, TokenStream>) -> Result<(), TokenStream> {
     let synfile = syn::parse_file(contents)
         .map_err(|e| compiler_error(&format!("Failed to parse as rust file\n{}", e)))?;
     for item in synfile.items {
@@ -466,7 +466,10 @@ pub fn iter_hira_modules(contents: &str, cb: &mut impl FnMut(ItemMod)) -> Result
             if x.content.is_none() {
                 continue;
             }
-            cb(x);
+            let should_continue = cb(x)?;
+            if !should_continue {
+                break;
+            }
         }
     }
     Ok(())
