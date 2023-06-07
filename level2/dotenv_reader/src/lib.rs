@@ -1,6 +1,7 @@
 use hira_lib::level0::L0Core;
 
 #[hira::hira]
+#[hira::hiracfg(no_web)]
 pub mod dotenv_reader {
     use super::L0Core;
 
