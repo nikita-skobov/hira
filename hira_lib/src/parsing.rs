@@ -308,7 +308,7 @@ pub fn extract_hiracfgs(attributes: &mut Vec<Attribute>, mut applied_to: Option<
         let list = if let Meta::List(l) = &attr.meta {
             let mut path_string = l.path.to_token_stream().to_string();
             remove_surrounding_quotes(&mut path_string);
-            if path_string == "hiracfg" {
+            if path_string.ends_with("hiracfg") {
                 l
             } else {
                 keep.push(attr);
