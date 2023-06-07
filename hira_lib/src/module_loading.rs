@@ -7,7 +7,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens};
 use wasm_type_gen::WasmIncludeString;
 
-use crate::parsing::{remove_surrounding_quotes, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples, is_public, has_derive, parse_module_name_from_use_names, has_comment, parse_documentation_from_attributes, iter_fields};
+use crate::parsing::{remove_surrounding_quotes, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples, is_public, has_derive, parse_module_name_from_use_names, has_comment, parse_documentation_from_attributes, iter_fields, Hiracfg};
 use crate::{wasm_types::*, level0::*};
 
 
@@ -101,6 +101,8 @@ pub struct HiraModule2 {
     pub input_definition: HashMap<String, InputDef>,
     pub level: ModuleLevel,
     pub errors_during_parsing: Vec<String>,
+
+    pub hiracfgs: Vec<Hiracfg>,
 
     /// during parsing we detect which outputs this module has in its use statements.
     /// prior to compiling, we fill in these outputs into the wasm code.

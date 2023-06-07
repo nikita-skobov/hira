@@ -22,6 +22,13 @@ use syn::{
 
 use crate::{module_loading::{HiraModule2, ModuleLevel, parse_module_from_stream}, wasm_types::{FunctionSignature, UserInput}, HiraConfig};
 
+#[derive(Default, Debug, Serialize, Deserialize)]
+pub struct Hiracfg {
+    pub key: String,
+    pub value: Option<String>,
+    pub applied_to: String,
+}
+
 pub fn default_stream() -> TokenStream {
     compiler_error("Failed to get hira config")
 }
@@ -275,6 +282,7 @@ pub fn iterate_mod_def(
     };
 
     iterate_mod_def_generic(module, mod_def, fn_callbacks, struct_callbacks, use_callbacks, mod_callbacks, const_callbacks, extern_crate_callbacks, impl_callbacks);
+    module.hiracfgs = extract_hiracfgs(&mut mod_def.attrs, None);
     // remove attributes, since we dont want to try to compile #[hira]
     mod_def.attrs.clear();
     module.contents = mod_def.to_token_stream().to_string();
@@ -291,6 +299,61 @@ pub fn remove_surrounding_quotes(s: &mut String) {
         s.remove(0);
         s.pop();
     }
+}
+
+pub fn extract_hiracfgs(attributes: &mut Vec<Attribute>, mut applied_to: Option<String>) -> Vec<Hiracfg> {
+    let mut keep = vec![];
+    let mut cfgs = vec![];
+    for attr in attributes.drain(..) {
+        let list = if let Meta::List(l) = &attr.meta {
+            let mut path_string = l.path.to_token_stream().to_string();
+            remove_surrounding_quotes(&mut path_string);
+            if path_string == "hiracfg" {
+                l
+            } else {
+                keep.push(attr);
+                continue;
+            }
+        } else {
+            keep.push(attr);
+            continue;
+        };
+        let mut first = None;
+        let mut second = None;
+        for token in list.tokens.clone().into_iter() {
+            let idstr = match &token {
+                TokenTree::Ident(id) => get_ident_string(id),
+                TokenTree::Literal(s) => {
+                    let mut s = s.to_string();
+                    remove_surrounding_quotes(&mut s);
+                    s
+                }
+                _ => continue,
+            };
+            if first.is_none() {
+                first = Some(idstr);
+                continue;
+            }
+            if second.is_none() {
+                second = Some(idstr);
+            } else {
+                break;
+            }
+        }
+        let cfg = match (first, second) {
+            (Some(k), x) => {
+                Hiracfg {
+                    key: k,
+                    value: x,
+                    applied_to: applied_to.take().unwrap_or_default(),
+                }
+            }
+            _ => continue,
+        };
+        cfgs.push(cfg);
+    }
+    *attributes = keep;
+    cfgs
 }
 
 /// given an arbitrary token stream, iterate and find all string literals
@@ -628,5 +691,23 @@ mod tests {
             outs.push((a.to_vec(), b, c));
         });
         assert_eq!(outs[0].0, &["some_module", "some_thing"]);
+    }
+
+    #[test]
+    fn extracting_attrs_works() {
+        let tokens: TokenStream = "#[hiracfg(helloworld)]pub const X: u32 = 2;".parse().unwrap();
+        let mut item_tree = syn::parse2::<ItemConst>(tokens).unwrap();
+        let out = extract_hiracfgs(&mut item_tree.attrs, None);
+        assert!(item_tree.attrs.is_empty());
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].key, "helloworld");
+
+        let tokens: TokenStream = "#[hiracfg(key = \"value\")]pub const X: u32 = 2;".parse().unwrap();
+        let mut item_tree = syn::parse2::<ItemConst>(tokens).unwrap();
+        let out = extract_hiracfgs(&mut item_tree.attrs, None);
+        assert!(item_tree.attrs.is_empty());
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].key, "key");
+        assert_eq!(out[0].value, Some("value".to_string()));
     }
 }
