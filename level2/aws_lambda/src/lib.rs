@@ -184,6 +184,12 @@ pub fn get_function_code_location(resource: &SavedResource) -> Option<(String, S
     }
 }
 
+/// This is a higher level module for easily creating lambda functions.
+/// To use this module, your calling module must contain a function `lambda_main`.
+/// This module parses the function signature of `lambda_main` and generates corresponding
+/// runtime and cloudformation resource(s). By default the runtime is arm64, and we create
+/// a role for your function automatically. To customize these, and other behaviors, see
+/// the input section.
 #[hira::hira]
 pub mod h_aws_lambda {
     extern crate lambda;

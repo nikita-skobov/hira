@@ -4,6 +4,10 @@ use aws_cfn_stack::aws_cfn_stack;
 pub mod s3_website_distribution;
 pub mod lambda_url_distribution;
 
+/// This is a low level module that creates an AWS CloudFront distribution.
+/// Creating a CloudFront distribution requires many inputs, so it is recommended to instead
+/// use a higher level type such as lambda_url_distribution, or s3_website_distribution.
+/// 
 #[hira::hira]
 pub mod aws_cloudfront_distribution {
     extern crate cloud_front;
@@ -27,6 +31,10 @@ pub mod aws_cloudfront_distribution {
     pub use self::cloud_front::distribution::ViewerCertificate;
 
     pub mod outputs {
+        /// this is the logical name in cloudformation for your distribution.
+        /// Reference this name in other resources that rely on it,
+        /// for example, perhaps a route53 record that needs to know the distribution
+        /// to point to.
         pub const LOGICAL_DISTR_NAME: &str = "UNDEFINED";
     }
 

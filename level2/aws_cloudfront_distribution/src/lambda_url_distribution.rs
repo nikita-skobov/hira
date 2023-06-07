@@ -23,6 +23,10 @@ pub mod lambda_url_distribution {
     pub use self::cloud_front::distribution::CustomOriginConfigOriginProtocolPolicyEnum;
     pub use self::cloud_front::distribution::DefaultCacheBehaviorViewerProtocolPolicyEnum;
 
+    pub mod outputs {
+        pub use super::aws_cloudfront_distribution::outputs::*;
+    }
+
     /// represents one origin in your distribution.
     /// path is the URL path that will map to your lambda function.
     #[derive(Default)]

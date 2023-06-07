@@ -21,6 +21,9 @@ pub mod s3_website_distribution {
     pub use self::cloud_front::distribution::CustomOriginConfigOriginProtocolPolicyEnum;
     pub use self::cloud_front::distribution::DefaultCacheBehaviorViewerProtocolPolicyEnum;
 
+    pub mod outputs {
+        pub use super::aws_cloudfront_distribution::outputs::*;
+    }
 
     #[derive(Default)]
     #[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]

@@ -1,6 +1,12 @@
 use hira_lib::level0::*;
 use aws_cfn_stack::aws_cfn_stack;
 
+/// this is a higher level module for creating S3 buckets easily. Some higher level
+/// functionality this provides is easily setting up static website hosting.
+/// In addition to creating an S3 bucket, by default we create custom cloudformation resources
+/// for cleanup. That is: a lambda function will be created that will delete the contents
+/// of this S3 bucket when the cloudformation stack gets deleted. This enables easy teardown.
+/// See the input section to customize this behavior.
 #[hira::hira]
 pub mod aws_s3 {
     extern crate s3;
@@ -22,6 +28,10 @@ pub mod aws_s3 {
     pub use self::s3::bucket::WebsiteConfiguration;
 
     pub mod outputs {
+        /// the logical name of the resource in cloudformation.
+        /// Reference this value in other modules, for example
+        /// allowing permissions to read/write from this bucket,
+        /// pointing a cloudfront distribution to this bucket, etc.
         pub const LOGICAL_BUCKET_NAME: &str = "UNDEFINED";
     }
 

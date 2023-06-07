@@ -197,6 +197,11 @@ pub async fn create_or_update_stack(client: &aws_sdk_cloudformation::Client, nam
     Ok(())
 }
 
+/// This module is a low level module built to enable easily creating other modules on top of it.
+/// To use this module you provide a list of Resources, where each Resource contains one or more
+/// cloudformation resource definitions. This module then saves all of the inputs across
+/// all invocations, and creates a runtime that will deploy one or many cloudformation stacks
+/// using the resources you defined.
 #[hira::hira]
 pub mod aws_cfn_stack {
     extern crate cfn_resources;
