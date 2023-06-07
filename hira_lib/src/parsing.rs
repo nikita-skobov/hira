@@ -275,7 +275,8 @@ pub fn iterate_mod_def(
     };
 
     iterate_mod_def_generic(module, mod_def, fn_callbacks, struct_callbacks, use_callbacks, mod_callbacks, const_callbacks, extern_crate_callbacks, impl_callbacks);
-
+    // remove attributes, since we dont want to try to compile #[hira]
+    mod_def.attrs.clear();
     module.contents = mod_def.to_token_stream().to_string();
 }
 
