@@ -332,6 +332,13 @@ pub mod h_aws_lambda {
         pub const LOGICAL_FUNCTION_URL_NAME: &str = "UNDEFINED";
     }
 
+    #[hira::hiracfg(editor)]
+    /// example fn
+    pub fn lambda_main(something: FunctionUrlEvent) -> FunctionUrlResponse {
+        todo!()
+    }
+
+
     pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[
         ("RUNTIME", &[""]),
         ("CODE_WRITE", &["fn_module:service_func", "fn_module:entrypoint"]),
