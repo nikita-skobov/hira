@@ -7,7 +7,7 @@ use proc_macro2::TokenStream;
 use quote::{ToTokens};
 use wasm_type_gen::WasmIncludeString;
 
-use crate::parsing::{remove_surrounding_quotes, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples, is_public, has_derive, parse_module_name_from_use_names, has_comment, parse_documentation_from_attributes, iter_fields, Hiracfg};
+use crate::parsing::{remove_surrounding_quotes, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples, is_public, has_derive, parse_module_name_from_use_names, has_comment, parse_documentation_from_attributes, iter_fields, Hiracfg, extract_hiracfgs};
 use crate::{wasm_types::*, level0::*};
 
 
@@ -798,6 +798,9 @@ pub fn hira_mod2_inner_ex(
 pub fn set_config_fn_sig(module: &mut HiraModule2, item: &mut syn::ItemFn) {
     let sig = &item.sig;
     let fn_name = get_ident_string(&sig.ident);
+    let item_str = item.to_token_stream().to_string();
+    let cfgs = extract_hiracfgs(&mut item.attrs, Some(item_str));
+    module.hiracfgs.extend(cfgs);
     if fn_name != "config" { return }
     module.config_fn_is_pub = is_public(&item.vis);
     for input in &sig.inputs {
