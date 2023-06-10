@@ -20,7 +20,32 @@ use syn::{
     Expr, ItemUse, Visibility, token::Pub, ItemExternCrate, Meta, ItemImpl, Attribute, Fields
 };
 
-use crate::{module_loading::{HiraModule2, ModuleLevel, parse_module_from_stream}, wasm_types::{FunctionSignature, UserInput}, HiraConfig};
+use crate::{module_loading::{HiraModule2, ModuleLevel, parse_module_from_stream}, HiraConfig};
+
+#[cfg(feature = "wasm")]
+use wasm_type_gen::*;
+
+#[cfg_attr(feature = "wasm", derive(WasmTypeGen, Debug))]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
+pub struct UserInput {
+    /// only relevant for input params to a function. not applicable to struct fields.
+    pub is_self: bool,
+    pub name: String,
+    pub ty: String,
+}
+
+#[cfg_attr(feature = "wasm", derive(WasmTypeGen, Debug))]
+#[derive(Default)]
+#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
+pub struct FunctionSignature {
+    pub name: String,
+    pub is_pub: bool,
+    pub is_async: bool,
+    pub is_unsafe: bool,
+    pub is_const: bool,
+    pub inputs: Vec<UserInput>,
+    pub return_ty: String,
+}
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct Hiracfg {

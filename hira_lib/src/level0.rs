@@ -5,7 +5,8 @@ use syn::{ItemMod, ItemFn, Item};
 use quote::{ToTokens};
 use wasm_type_gen::*;
 
-use crate::{HiraConfig, module_loading::{HiraModule2, OutputType}, parsing::{compiler_error, iterate_mod_def_generic, parse_fn_signature}, wasm_types::{to_map_entry, FunctionSignature}};
+use crate::{HiraConfig, module_loading::{HiraModule2, OutputType}, parsing::{compiler_error, iterate_mod_def_generic, parse_fn_signature}, wasm_types::{to_map_entry}};
+use crate::parsing::FunctionSignature;
 
 
 #[derive(WasmTypeGen, Debug)]

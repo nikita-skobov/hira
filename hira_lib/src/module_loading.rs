@@ -5,9 +5,11 @@ use serde::{Serialize, Deserialize};
 
 use proc_macro2::TokenStream;
 use quote::{ToTokens};
+#[cfg(feature = "wasm")]
 use wasm_type_gen::WasmIncludeString;
 
 use crate::parsing::{remove_surrounding_quotes, parse_as_module_item, iterate_mod_def, get_ident_string, iterate_item_tree, parse_module_name_from_use_tree, iterate_tuples, is_public, has_derive, parse_module_name_from_use_names, has_comment, parse_documentation_from_attributes, iter_fields, Hiracfg, extract_hiracfgs};
+#[cfg(feature = "wasm")]
 use crate::{wasm_types::*, level0::*};
 
 
@@ -461,6 +463,7 @@ impl HiraModule2 {
         Ok(())
     }
 
+    #[cfg(feature = "wasm")]
     /// we restrict use statements to only be valid for:
     /// - L0 modules and associated helpers,
     /// - L2 modules that this module depends on (ie: params that are in its config signature)
@@ -617,6 +620,7 @@ impl HiraModule2 {
         // verify use statements are valid to ensure
         // that the user doesnt get an annoying compilation error on build.
         // we can provide a nicer error message that explains what they're doing wrong.
+        #[cfg(feature = "wasm")]
         self.verify_use_dependencies()?;
 
         if self.level == ModuleLevel::Level3 {
@@ -695,6 +699,7 @@ impl HiraModule2 {
 // }
 
 /// corresponds to the main hira_mod! macro
+#[cfg(feature = "wasm")]
 pub fn hira_mod2(mut stream: TokenStream, mut _attr: TokenStream) -> TokenStream {
     let mut out = Err(default_stream());
     let out_ref = &mut out;
@@ -735,6 +740,7 @@ pub fn should_compile() -> bool {
     true
 }
 
+#[cfg(feature = "wasm")]
 pub fn hira_mod2_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<TokenStream, TokenStream> {
     // originally i had the idea that itd be nice to get compiler errors
     // as you type in your editor, so you can get a quicker feedback loop.
@@ -750,6 +756,7 @@ pub fn hira_mod2_inner(conf: &mut HiraConfig, stream: TokenStream) -> Result<Tok
     hira_mod2_inner_ex(conf, stream, should_compile, false, None)
 }
 
+#[cfg(feature = "wasm")]
 pub fn hira_mod2_inner_ex(
     conf: &mut HiraConfig,
     mut stream: TokenStream,
@@ -1024,6 +1031,7 @@ pub fn parse_module_from_stream(stream: TokenStream) -> Result<HiraModule2, Toke
 }
 
 
+#[cfg(feature = "wasm")]
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;

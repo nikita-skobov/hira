@@ -13,32 +13,10 @@ use crate::{
     level0::*,
 };
 
-#[derive(WasmTypeGen, Debug)]
-#[derive(Default)]
-#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
-pub struct FunctionSignature {
-    pub name: String,
-    pub is_pub: bool,
-    pub is_async: bool,
-    pub is_unsafe: bool,
-    pub is_const: bool,
-    pub inputs: Vec<UserInput>,
-    pub return_ty: String,
-}
-
 #[derive(Debug)]
 pub struct MapEntry<T> {
     pub key: String,
     pub lines: Vec<T>,
-}
-
-#[derive(WasmTypeGen, Debug)]
-#[cfg_attr(feature = "web", derive(serde::Serialize, serde::Deserialize))]
-pub struct UserInput {
-    /// only relevant for input params to a function. not applicable to struct fields.
-    pub is_self: bool,
-    pub name: String,
-    pub ty: String,
 }
 
 #[derive(WasmTypeGen, Debug)]

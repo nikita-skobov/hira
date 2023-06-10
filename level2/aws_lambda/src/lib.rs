@@ -2,7 +2,7 @@ use std::io::Write;
 use aws_sdk_s3::primitives::ByteStream;
 use cfn_resources::CfnResource;
 use hira_lib::level0::*;
-use hira_lib::wasm_types::FunctionSignature;
+use hira_lib::parsing::FunctionSignature;
 use aws_cfn_stack::aws_cfn_stack;
 use ::aws_cfn_stack::{aws_cfn_stack::{SavedResource, SavedTemplate, ResourceOutput}, create_or_update_stack, wait_for_output};
 use cfn_resources::serde_json::Value;

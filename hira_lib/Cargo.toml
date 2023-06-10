@@ -6,14 +6,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-proc-macro2 = "1.0.52"
+proc-macro2 = { version = "1.0.52", features = ["span-locations"] }
 syn = { version = "2", features = ["extra-traits"] }
 quote = "1"
-wasm_type_gen = { git = "https://github.com/nikita-skobov/wasm_type_gen", rev = "a67fea20ae2acc2e7e85b560f13a934e0246abe1" }
-adler32 = "*"
-toml = "0.7.3"
 serde = { version = "1.0.162", features = ["derive"] }
 serde_json = "1.0.96"
+wasm_type_gen = { git = "https://github.com/nikita-skobov/wasm_type_gen", rev = "a67fea20ae2acc2e7e85b560f13a934e0246abe1", optional = true }
+adler32 = { version = "*", optional = true }
+toml = { version = "0.7.3", optional = true }
 
 [features]
+default = ["wasm"]
+wasm = ["wasm_type_gen", "adler32", "toml"]
 web = []

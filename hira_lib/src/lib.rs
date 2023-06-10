@@ -3,15 +3,22 @@ use std::io::Write;
 use std::sync::Mutex;
 use parsing::compiler_error;
 use proc_macro2::TokenStream;
+#[cfg(feature = "wasm")]
 use toml::Table;
+#[cfg(feature = "wasm")]
 use wasm_type_gen::{WasmIncludeString, WASM_PARSING_TRAIT_STR};
+#[cfg(feature = "wasm")]
 use wasm_types::MapEntry;
-use level0::*;
+
 
 pub mod parsing;
 pub mod module_loading;
+#[cfg(feature = "wasm")]
 pub mod wasm_types;
+#[cfg(feature = "wasm")]
 pub mod level0;
+#[cfg(feature = "wasm")]
+use level0::*;
 
 pub const HIRA_DIR_NAME: &'static str = "hira";
 pub const HIRA_WASM_DIR_NAME: &'static str = "wasm_out";
@@ -40,7 +47,10 @@ pub struct HiraConfig {
     pub should_do_file_ops: bool,
     pub known_cargo_dependencies: HashSet<String>,
     pub shared_data: HashMap<String, String>,
+    #[cfg(feature = "wasm")]
     pub shared_file_data: Vec<MapEntry<MapEntry<String>>>,
+    #[cfg(not(feature = "wasm"))]
+    pub shared_file_data: Vec<()>,
     /// a map of module name to a string containing callback code that should
     /// run prior to any invocation of this module.
     pub default_callbacks: HashMap<String, String>,
@@ -53,7 +63,10 @@ pub struct HiraConfig {
     /// in the main function for that runtime.
     /// the value contains a bool that indicates if the runtime was already written out
     /// to the main file or not.
+    #[cfg(feature = "wasm")]
     pub runtimes: HashMap<String, (bool, RuntimeMeta, Vec<String>, Vec<String>)>,
+    #[cfg(not(feature = "wasm"))]
+    pub runtimes: HashMap<String, String>,
     pub has_deleted_build_script: bool,
 }
 
@@ -61,6 +74,7 @@ impl HiraConfig {
     pub fn get_mod2(&self, name: &str) -> Option<&module_loading::HiraModule2> {
         self.modules2.get(name)
     }
+    #[cfg(feature = "wasm")]
     fn add_to_runtime(&mut self, runtime_name: String, meta: RuntimeMeta, runtime_code: String, unique_code: bool) {
         if let Some((_, _, existing, _)) = self.runtimes.get_mut(&runtime_name) {
             if unique_code {
@@ -76,6 +90,7 @@ impl HiraConfig {
             self.runtimes.insert(runtime_name, (false, meta, vec![runtime_code], vec![]));
         }
     }
+    #[cfg(feature = "wasm")]
     fn set_runtime_data(&mut self, runtime_name: &str, data: Vec<String>) {
         if let Some((_, _, _, existing_data)) = self.runtimes.get_mut(runtime_name) {
             existing_data.extend(data);
@@ -84,13 +99,16 @@ impl HiraConfig {
     pub fn new() -> Self {
         let mut out = Self::default();
         out.set_directories();
+        #[cfg(feature = "wasm")]
         out.load_cargo_toml();
         out.set_should_do_file_ops();
+        #[cfg(feature = "wasm")]
         out.set_base_code();
 
         out
     }
 
+    #[cfg(feature = "wasm")]
     fn set_base_code(&mut self) {
         let mut hira_base = LibraryObj::include_in_rs_wasm();
         hira_base.push_str(WASM_PARSING_TRAIT_STR);
@@ -121,6 +139,7 @@ impl HiraConfig {
         self.should_do_file_ops = should_do;
     }
 
+    #[cfg(feature = "wasm")]
     fn merge_shared_files(
         &mut self,
         wasm_module_name: &str,
@@ -181,6 +200,7 @@ impl HiraConfig {
         Ok(())
     }
 
+    #[cfg(feature = "wasm")]
     fn iterate_map_entry(
         file_entry: &mut MapEntry<MapEntry<String>>,
         mut cb: impl FnMut(&str) -> Result<(), TokenStream>
@@ -202,6 +222,7 @@ impl HiraConfig {
 
     // this is a test utility to verify file operations happen correctly
     // without needing to write out to disk
+    #[cfg(feature = "wasm")]
     #[allow(dead_code)]
     #[cfg(debug_assertions)]
     fn get_shared_file_data(&mut self, name: &str) -> Option<String> {
@@ -215,6 +236,7 @@ impl HiraConfig {
         Some(out)
     }
 
+    #[cfg(feature = "wasm")]
     fn output_shared_files(
         &mut self,
         wasm_module_name: &str,
@@ -247,6 +269,7 @@ impl HiraConfig {
         Ok(())
     }
 
+    #[cfg(feature = "wasm")]
     fn append_to_build_script(
         meta: &RuntimeMeta,
         runtime_name: &str, path: &str,
@@ -325,6 +348,7 @@ async fn main() {{
         Ok(())
     }
 
+    #[cfg(feature = "wasm")]
     fn output_runtimes(&mut self, stream: &mut TokenStream) -> Result<(), TokenStream> {
         if !self.has_deleted_build_script && self.should_do_file_ops {
             let _ = std::fs::remove_file(&self.build_script_path);
@@ -374,6 +398,7 @@ fi
         self.crate_name = crate_name;
     }
 
+    #[cfg(feature = "wasm")]
     fn load_cargo_toml(&mut self) {
         let file_path = format!("{}/Cargo.toml", self.cargo_directory);
         let cargo_file_str = if let Ok(file_str) = std::fs::read_to_string(file_path) {
@@ -409,6 +434,7 @@ pub fn use_hira_config(mut cb: impl FnMut(&mut HiraConfig)) {
     }
 }
 
+#[cfg(feature = "wasm")]
 #[cfg(test)]
 pub mod e2e_tests {
     use std::str::FromStr;
@@ -440,6 +466,7 @@ pub mod e2e_tests {
         conf_cb: impl Fn(&mut HiraConfig),
     ) -> Result<(HiraConfig, TokenStream), TokenStream> {
         let mut conf = HiraConfig::default();
+        #[cfg(feature = "wasm")]
         conf.set_base_code();
         let path = std::path::PathBuf::from("./test_out");
         let _ = std::fs::create_dir("test_out");
@@ -1009,6 +1036,7 @@ pub mod e2e_tests {
         assert_contains_str(err_str, "requested to use runtime hello but no RUNTIME capability was found");
     }
 
+    #[cfg(feature = "wasm")]
     #[test]
     fn mod2_can_set_runtimes() {
         let code = [
@@ -1038,6 +1066,7 @@ pub mod e2e_tests {
         assert_eq!(conf.runtimes["hello"].2[0], "world();");
     }
 
+    #[cfg(feature = "wasm")]
     #[test]
     fn mod2_can_set_runtimes_with_unique_code() {
         let code = [
@@ -1069,6 +1098,7 @@ pub mod e2e_tests {
         assert_eq!(conf.runtimes["hello"].2[0], "world();");
     }
 
+    #[cfg(feature = "wasm")]
     #[test]
     fn mod2_can_set_runtimes_with_order() {
         let code = [
