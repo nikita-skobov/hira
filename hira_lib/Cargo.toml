@@ -17,5 +17,6 @@ toml = { version = "0.7.3", optional = true }
 
 [features]
 default = ["wasm"]
+extraparsing = []
 wasm = ["wasm_type_gen", "adler32", "toml"]
 web = []

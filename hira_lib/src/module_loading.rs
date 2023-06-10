@@ -5,6 +5,8 @@ use serde::{Serialize, Deserialize};
 
 use proc_macro2::TokenStream;
 use quote::{ToTokens};
+use syn::Item;
+use syn::spanned::Spanned;
 #[cfg(feature = "wasm")]
 use wasm_type_gen::WasmIncludeString;
 
@@ -154,6 +156,14 @@ pub struct HiraModule2 {
     /// such that level0 modules can expand on top of this functionality
     /// and can define their own custom keywords/semantics
     pub capability_params: HashMap<String, Vec<String>>,
+
+    /// only used if extraparsing feature is enabled.
+    /// we store everything we find related to hira that isn't part
+    /// of a normal module definition. eg: storing extra constants, extra functions, etc.
+    /// the u32 is the line number it was found on, and the string is the raw token string
+    pub extra_parsed_items: Vec<(u32, String)>,
+    pub extra_parsed_config_idents: Vec<String>,
+    pub extra_parsed_config_body: (u32, String),
 }
 
 impl HiraModule2 {
@@ -625,6 +635,7 @@ impl HiraModule2 {
 
         if self.level == ModuleLevel::Level3 {
             self.assert_level_3_and_set_depends_on()?;
+            #[cfg(feature = "wasm")]
             self.verify_dependencies_exist_or_load(conf)?;
         }
 
@@ -808,12 +819,26 @@ pub fn set_config_fn_sig(module: &mut HiraModule2, item: &mut syn::ItemFn) {
     let item_str = item.to_token_stream().to_string();
     let cfgs = extract_hiracfgs(&mut item.attrs, Some(item_str));
     module.hiracfgs.extend(cfgs);
-    if fn_name != "config" { return }
+    if fn_name != "config" {
+        #[cfg(feature = "extraparsing")]
+        add_to_extras(module, item.to_token_stream());
+        return
+    }    
+    #[cfg(feature = "extraparsing")]
+    {
+        module.extra_parsed_config_body = (item.span().start().line as u32, item.block.to_token_stream().to_string());
+    }
+
     module.config_fn_is_pub = is_public(&item.vis);
     for input in &sig.inputs {
         let push_s = match input {
             syn::FnArg::Receiver(_) => "self".to_string(),
             syn::FnArg::Typed(x) => {
+                #[cfg(feature = "extraparsing")]
+                if let syn::Pat::Ident(id) = &*x.pat {
+                    let id_str = get_ident_string(&id.ident);
+                    module.extra_parsed_config_idents.push(id_str);
+                }
                 x.ty.to_token_stream().to_string()
             }
         };
@@ -823,6 +848,8 @@ pub fn set_config_fn_sig(module: &mut HiraModule2, item: &mut syn::ItemFn) {
 
 pub fn set_capability_params(module: &mut HiraModule2, item: &mut syn::ItemConst) {
     if item.ident.to_string() != CAPABILITY_PARAMS_NAME {
+        #[cfg(feature = "extraparsing")]
+        add_to_extras(module, item.to_token_stream());
         return;
     }
     iterate_tuples(&*item.expr, &mut |key, val| {
@@ -840,6 +867,8 @@ pub fn set_capability_params(module: &mut HiraModule2, item: &mut syn::ItemConst
 pub fn set_input_item_struct(module: &mut HiraModule2, item: &mut syn::ItemStruct) {
     let struct_name = get_ident_string(&item.ident);
     if struct_name != "Input" {
+        #[cfg(feature = "extraparsing")]
+        add_to_extras(module, item.to_token_stream());
         return;
     }
     let doc = parse_documentation_from_attributes(&item.attrs);
@@ -857,20 +886,28 @@ pub fn check_for_default_impl(module: &mut HiraModule2, item: &mut syn::ItemImpl
     let (_, path, _) = if let Some(trait_tuple) = &item.trait_ {
         trait_tuple
     } else {
+        #[cfg(feature = "extraparsing")]
+        add_to_extras(module, item.to_token_stream());
         return
     };
     let first = if let Some(first) = path.segments.first() {
         first
     } else {
+        #[cfg(feature = "extraparsing")]
+        add_to_extras(module, item.to_token_stream());
         return
     };
     let id_string = get_ident_string(&first.ident);
     if id_string != "Default" {
+        #[cfg(feature = "extraparsing")]
+        add_to_extras(module, item.to_token_stream());
         return;
     }
     let type_path = if let syn::Type::Path(p) = &*item.self_ty {
         p
     } else {
+        #[cfg(feature = "extraparsing")]
+        add_to_extras(module, item.to_token_stream());
         return;
     };
     for seg in type_path.path.segments.iter() {
@@ -952,6 +989,9 @@ pub fn set_use_dependencies(module: &mut HiraModule2, item: &mut syn::ItemUse) {
         let replacement_item = syn::parse2::<syn::ItemUse>(replacement).unwrap();
         *item = replacement_item;
         module.fill_outputs.extend(outputs);
+    } else {
+        #[cfg(feature = "extraparsing")]
+        add_to_extras(module, item.to_token_stream());
     }
     module.use_dependencies = deps;
 }
@@ -967,7 +1007,11 @@ pub fn set_extern_crates(module: &mut HiraModule2, item: &mut syn::ItemExternCra
 
 pub fn set_outputs(module: &mut HiraModule2, item: &mut syn::ItemMod) {
     let name = get_ident_string(&item.ident);
-    if name != "outputs" { return; }
+    if name != "outputs" {
+        #[cfg(feature = "extraparsing")]
+        add_to_extras(module, item.to_token_stream());
+        return;
+    }
     match item.vis {
         // ignore non-public output modules. this will be caught in verification
         // and show an error to the user if they didnt mark their outputs as pub
@@ -1011,6 +1055,23 @@ pub fn set_outputs(module: &mut HiraModule2, item: &mut syn::ItemMod) {
     }
 }
 
+pub fn add_to_extras(module: &mut HiraModule2, item: TokenStream) {
+    use syn::spanned::Spanned;
+    let line = item.span().start().line as u32;
+    let contents = item.to_token_stream().to_string();
+    module.extra_parsed_items.push((line, contents));
+}
+
+#[cfg(feature = "extraparsing")]
+pub fn fallback_cb(module: &mut HiraModule2, item: &mut Item) {
+    add_to_extras(module, item.to_token_stream())
+}
+
+#[cfg(not(feature = "extraparsing"))]
+pub fn fallback_cb(module: &mut HiraModule2, item: &mut Item) {
+    add_to_extras(module, item.to_token_stream())
+}
+
 pub fn parse_module_from_stream(stream: TokenStream) -> Result<HiraModule2, TokenStream> {
     let mut mod_def = parse_as_module_item(stream)?;
     let mut hira_mod = HiraModule2::default();
@@ -1026,6 +1087,7 @@ pub fn parse_module_from_stream(stream: TokenStream) -> Result<HiraModule2, Toke
         &[set_capability_params],
         &[set_extern_crates],
         &[check_for_default_impl],
+        fallback_cb,
     );
     Ok(hira_mod)
 }

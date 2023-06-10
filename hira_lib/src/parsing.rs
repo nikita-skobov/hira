@@ -244,6 +244,7 @@ pub fn iterate_mod_def_generic<T>(
     const_callbacks: &[fn(&mut T, &mut ItemConst)],
     extern_crate_callbacks: &[fn(&mut T, &mut ItemExternCrate)],
     impl_callbacks: &[fn(&mut T, &mut ItemImpl)],
+    fallback_cb: &[fn(&mut T, &mut Item)],
 ) {
     let mut default_vec = vec![];
     let content = mod_def.content.as_mut().map(|x| &mut x.1).unwrap_or(&mut default_vec);
@@ -284,7 +285,11 @@ pub fn iterate_mod_def_generic<T>(
                     cb(thing, x);
                 }
             }
-            _ => {},
+            x => {
+                for cb in fallback_cb {
+                    cb(thing, x);
+                }
+            },
         }
     }
 }
@@ -299,6 +304,7 @@ pub fn iterate_mod_def(
     const_callbacks: &[fn(&mut HiraModule2, &mut ItemConst)],
     extern_crate_callbacks: &[fn(&mut HiraModule2, &mut ItemExternCrate)],
     impl_callbacks: &[fn(&mut HiraModule2, &mut ItemImpl)],
+    fallback_cb: fn(&mut HiraModule2, &mut Item),
 ) {
     module.name = get_ident_string(&mod_def.ident);
     module.is_pub = match mod_def.vis {
@@ -306,7 +312,16 @@ pub fn iterate_mod_def(
         _ => false,
     };
 
-    iterate_mod_def_generic(module, mod_def, fn_callbacks, struct_callbacks, use_callbacks, mod_callbacks, const_callbacks, extern_crate_callbacks, impl_callbacks);
+    iterate_mod_def_generic(module, mod_def,
+        fn_callbacks,
+        struct_callbacks,
+        use_callbacks,
+        mod_callbacks,
+        const_callbacks,
+        extern_crate_callbacks,
+        impl_callbacks,
+        &[fallback_cb],
+    );
     let cfgs = extract_hiracfgs(&mut mod_def.attrs, None);
     module.hiracfgs.extend(cfgs);
     // remove attributes, since we dont want to try to compile #[hira]
