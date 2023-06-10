@@ -327,6 +327,30 @@ pub fn remove_surrounding_quotes(s: &mut String) {
     }
 }
 
+pub fn attr_ends_in(attr: &Attribute, searchstr: &str) -> bool {
+    let path = match &attr.meta {
+        Meta::Path(p) => {
+            p
+        }
+        Meta::List(l) => {
+            &l.path
+        }
+        Meta::NameValue(n) => {
+            &n.path
+        }
+    };
+    let mut path_string = path.to_token_stream().to_string();
+    remove_surrounding_quotes(&mut path_string);
+    path_string.ends_with(searchstr)
+}
+
+pub fn has_attr_that_ends_in(attributes: &[Attribute], searchstr: &str) -> bool {
+    for attr in attributes.iter() {
+        if attr_ends_in(attr, searchstr) { return true; }
+    }
+    false
+}
+
 pub fn extract_hiracfgs(attributes: &mut Vec<Attribute>, mut applied_to: Option<String>) -> Vec<Hiracfg> {
     let mut keep = vec![];
     let mut cfgs = vec![];
