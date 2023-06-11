@@ -2,6 +2,7 @@
 members = [
     "hira",
     "hira_lib",
+    "hira_cli",
     "real_world_examples",
     "level2/dotenv_reader",
     "level2/aws_lambda",
