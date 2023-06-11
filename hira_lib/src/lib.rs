@@ -302,7 +302,6 @@ impl HiraConfig {
             meta.profile.as_str()
         };
         let cmd_out = Command::new(cargo_cmd)
-            .env("CARGO_WASMTYPEGEN_FILEOPS", "\"0\"")
             .env("RUSTFLAGS", &rustflags)
             .args(args).output().map_err(|e| format!("Failed to compile runtime {runtime_name}\n{:?}", e))?;
         if !cmd_out.status.success() {
