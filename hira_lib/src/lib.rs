@@ -36,6 +36,7 @@ pub struct HiraConfig {
     pub gen_directory: String,
     pub build_script_path: String,
     pub runtime_directory: String,
+    pub logfile: String,
     pub crate_name: String,
     /// this directory is in the user's target/ folder.
     /// its purpose is to cache the module source code such that
@@ -442,6 +443,7 @@ fi
         self.gen_directory = format!("{}/{HIRA_GEN_DIR_NAME}", self.hira_directory);
         self.module_cache_directory = format!("{}/{HIRA_DIR_NAME}/cached_modules", target_dir);
         self.build_script_path = format!("{}/build.sh", self.cargo_directory);
+        self.logfile = format!("{}/hira.log", self.wasm_directory);
         self.runtime_directory = format!("{}/{HIRA_RUNTIMES_DIR_NAME}", self.hira_directory);
         self.crate_name = crate_name;
     }

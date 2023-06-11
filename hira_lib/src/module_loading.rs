@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt::format;
 
 
 use serde::{Serialize, Deserialize};
@@ -683,31 +684,16 @@ impl HiraModule2 {
 //     String::from_utf8_lossy(&cmd.stdout).to_string()
 // }
 
-// pub fn print_debug_stuff() {
-//     use std::io::Write;
-//     let id = std::process::id();
-//     let id_str = id.to_string();
-//     let process_info = get_process_info(&id_str);
-//     let out_f = "/home/madmin/hira.log";
-//     let mut out_f = std::fs::File::options().create(true).append(true).open(out_f).expect("Failed to open log file");
-//     let (parent_id, parent_process_info) = if let Some((_, b)) = process_info.split_once(&id_str) {
-//         let b = b.trim();
-//         if let Some((parent_id, _)) = b.split_once(" ") {
-//             (parent_id.trim().to_string(), get_process_info(parent_id.trim()))
-//         } else {
-//             ("".to_string(), "".to_string())
-//         }
-//     } else { ("".to_string(), "".to_string()) };
-//     let my_process_info = format!("__PROC_ID:{}\n{}", id, process_info);
-//     let parent_process_info = format!("__PARENT_PROC_ID:{}\n{}", parent_id, parent_process_info);
-//     out_f.write_all(my_process_info.as_bytes()).expect("Failed to write proc id");
-//     out_f.write_all(parent_process_info.as_bytes()).expect("Failed to write proc id");
-//     for (key, val) in std::env::vars() {
-//         let out = format!("{}:{}\n", key, val);
-//         out_f.write_all(out.as_bytes()).expect("Failed to write to log file");
-//     }
-//     out_f.write_all("\n\n".as_bytes()).expect("Failed...");
-// }
+pub fn print_debug<S: AsRef<str>>(out_f: &str, contents: S) {
+    use std::io::Write;
+    let mut out_f = if let Ok(f) = std::fs::File::options().create(true).append(true).open(out_f) {
+        f
+    } else {
+        return
+    };
+    // best effort
+    let _ = out_f.write_all(contents.as_ref().as_bytes());
+}
 
 /// corresponds to the main hira_mod! macro
 #[cfg(feature = "wasm")]
@@ -804,6 +790,8 @@ pub fn hira_mod2_inner_ex(
     pass_this.initialize_capabilities(conf, &mut module)?;
 
     let mut lib_obj = get_wasm_output(
+        &module.name,
+        &conf.logfile,
         &conf.wasm_directory,
         &codes,
         &extern_dependencies,

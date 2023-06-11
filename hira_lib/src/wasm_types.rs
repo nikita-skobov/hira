@@ -9,7 +9,7 @@ use crate::{
         DependencyConfig, fill_dependency_config,
     },
     HiraConfig,
-    module_loading::{HiraModule2},
+    module_loading::{HiraModule2, print_debug},
     level0::*,
 };
 
@@ -46,6 +46,8 @@ pub fn to_map_entry(data: Vec<SharedOutputEntry>) -> Vec<MapEntry<MapEntry<(bool
 
 /// TODO: should this fn be allowed to panic???
 pub fn get_wasm_output(
+    name: &str,
+    logfile: &str,
     wasm_out_dir: &str,
     code: &[(String, String)],
     extern_crates: &[String],
@@ -54,15 +56,23 @@ pub fn get_wasm_output(
     custom_codegen_opts: Option<Vec<&str>>,
 ) -> Option<LibraryObj> {
     let _ = std::fs::create_dir_all(wasm_out_dir);
+    let now = std::time::Instant::now();
     let out_file = wasm_type_gen::compile_strings_to_wasm_with_extern_crates(
         code, extern_crates,
         wasm_out_dir, custom_codegen_opts
     ).expect("compilation error");
+    let elapsed = now.elapsed().as_millis();
+    let contents = format!("COMPILE_STRINGS_TO_WASM_WITH_EXTERN_CRATES {}, dur={}ms\n", name, elapsed);
+    print_debug(logfile, contents);
     if dont_run_wasm {
         return None;
     }
+    let now = std::time::Instant::now();
     let wasm_file = std::fs::read(out_file).expect("failed to read wasm binary");
     let out = run_wasm(&wasm_file, data_to_pass.to_binary_slice()).expect("runtime error running wasm");
+    let elapsed = now.elapsed().as_millis();
+    let contents = format!("RUN_WASM {name}, dur={elapsed}ms\n");
+    print_debug(logfile, contents);
     LibraryObj::from_binary_slice(out)
 }
 
