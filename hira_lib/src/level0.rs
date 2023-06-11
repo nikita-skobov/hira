@@ -5,7 +5,7 @@ use syn::{ItemMod, ItemFn, Item};
 use quote::{ToTokens};
 use wasm_type_gen::*;
 
-use crate::{HiraConfig, module_loading::{HiraModule2, OutputType}, parsing::{compiler_error, iterate_mod_def_generic, parse_fn_signature}, wasm_types::{to_map_entry}};
+use crate::{HiraConfig, module_loading::{HiraModule2, OutputType, print_debug}, parsing::{compiler_error, iterate_mod_def_generic, parse_fn_signature}, wasm_types::{to_map_entry}};
 use crate::parsing::FunctionSignature;
 
 
@@ -417,6 +417,7 @@ impl L0RuntimeCreator {
             }
             conf.set_runtime_data(&runtime_name, runtime_info.shared_data);
         }
+        print_debug(&conf.logfile, format!("Outputting runtimes for {}\n", module.name));
         conf.output_runtimes(stream)?;
         Ok(())
     }

@@ -800,6 +800,8 @@ pub fn hira_mod2_inner_ex(
     ).unwrap_or_default();
     if !dont_run_wasm {
         lib_obj.apply_changes(conf, &mut module, &mut stream)?;
+    } else {
+        print_debug(&conf.logfile, format!("not applying library obj changes from {} because dont_run_wasm = true\n", module.name));
     }
 
     conf.modules2.insert(module.name.clone(), module);

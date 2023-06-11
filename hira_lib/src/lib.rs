@@ -9,6 +9,7 @@ use toml::Table;
 use wasm_type_gen::{WasmIncludeString, WASM_PARSING_TRAIT_STR};
 #[cfg(feature = "wasm")]
 use wasm_types::MapEntry;
+use module_loading::print_debug;
 
 
 pub mod parsing;
@@ -131,6 +132,7 @@ impl HiraConfig {
         let mut should_do = false;
         if let Ok(env) = std::env::var("RUST_BACKTRACE") {
             if env == "full" {
+                print_debug(&self.logfile, format!("setting should_do=true because RUST_BACKTRACE=full\n"));
                 should_do = true;
             }
         }
@@ -141,7 +143,9 @@ impl HiraConfig {
             } else if env == "true" || env == "1" {
                 should_do = true;
             }
+            print_debug(&self.logfile, format!("setting should_do={should_do} because CARGO_WASMTYPEGEN_FILEOPS={env}\n"));
         }
+        print_debug(&self.logfile, format!("setting should_do_file_ops and should_output_build_script={should_do}\n"));
         self.should_do_file_ops = should_do;
         self.should_output_build_script = should_do;
     }
@@ -308,6 +312,7 @@ impl HiraConfig {
         };
         let cmd_out = Command::new(cargo_cmd)
             .env("RUSTFLAGS", &rustflags)
+            .env("CARGO_WASMTYPEGEN_FILEOPS", "0")
             .args(args).output().map_err(|e| format!("Failed to compile runtime {runtime_name}\n{:?}", e))?;
         if !cmd_out.status.success() {
             let err_str = String::from_utf8_lossy(&cmd_out.stderr).to_string();
@@ -397,6 +402,7 @@ async fn main() {{
 
     #[cfg(feature = "wasm")]
     fn output_runtimes(&mut self, stream: &mut TokenStream) -> Result<(), TokenStream> {
+        print_debug(&self.logfile, format!("Outputting runtimes. should_do_file_ops={}, should_output_build_script={}\n", self.should_do_file_ops, self.should_output_build_script));
         if !self.has_deleted_build_script && self.should_do_file_ops {
             let _ = std::fs::remove_file(&self.build_script_path);
             let _ = std::fs::create_dir_all(&self.runtime_directory);
