@@ -759,7 +759,7 @@ pub fn hira_mod2_inner_ex(
     should_compile: bool,
     dont_run_wasm: bool,
     custom_codegen_opts: Option<Vec<&str>>,
-    compile_log: Option<fn (&str) -> String>,
+    compile_log: Option<fn (&str)>,
 ) -> Result<TokenStream, TokenStream> {
     let mut module = parse_module_from_stream(stream.clone())?;
     module.verify_config_signature(conf)?;
@@ -779,8 +779,7 @@ pub fn hira_mod2_inner_ex(
     }
 
     if let Some(log_fn) = &compile_log {
-        let log = log_fn(&module.name);
-        println!("{log}");
+        log_fn(&module.name);
     }
     module.insert_evaluated_outputs(conf)?;
     let codes = get_wasm_code_to_compile2(conf, &module)?;

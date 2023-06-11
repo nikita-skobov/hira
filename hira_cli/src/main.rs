@@ -170,8 +170,8 @@ fn build_runtime(
     Ok(())
 }
 
-fn compile_log(name: &str) -> String {
-    format!("Analyzing {name}")
+fn compile_log(name: &str) {
+    println!("Analyzing {name}");
 }
 
 fn fill_hira_graph(files: &Vec<PathBuf>) -> Result<HiraConfig, String> {
