@@ -111,6 +111,7 @@ fn build_runtimes(
                 &conf.runtime_directory, &conf.crate_name,
                 runtime, &logfile, None,
             )?;
+            println!("Running {}:\n", runtime_name);
             run_runtime(&conf.runtime_directory, &runtime_name)?;
         } else {
             return Err(format!("Runtime {} does not exist", runtime_name));
