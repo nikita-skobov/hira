@@ -89,8 +89,18 @@ pub fn get_wasm_code_to_compile2(
         dependency_config, &dependency_name,
     );
 
-    let module_code = module_code.to_string();
-    let users_code = users_code.to_string();
+    let module_code_str = module_code.to_string();
+    let module_code = if let Ok(f) = syn::parse_file(&module_code_str) {
+        prettyplease::unparse(&f)
+    } else {
+        module_code_str
+    };
+    let user_code_str = users_code.to_string();
+    let users_code = if let Ok(f) = syn::parse_file(&user_code_str) {
+        prettyplease::unparse(&f)
+    } else {
+        user_code_str
+    };
 
     Ok([
         ("hira_base".to_string(), hira_base_code),

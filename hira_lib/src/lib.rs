@@ -116,7 +116,11 @@ impl HiraConfig {
         for s in get_include_string() {
             hira_base.push_str(s);
         }
-        self.hira_base_code = hira_base;
+        self.hira_base_code = if let Ok(f) = syn::parse_file(&hira_base) {
+            prettyplease::unparse(&f)
+        } else {
+            hira_base
+        };
     }
 
     fn set_should_do_file_ops(&mut self) {
