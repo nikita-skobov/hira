@@ -26,7 +26,7 @@ pub async fn create_bucket_stack() -> String {
 
     // check if this stack already exists.
     // if it does, then just return the name of the s3 bucket output
-    match wait_for_output(&client, STACK_NAME).await {
+    match wait_for_output(&client, STACK_NAME, None).await {
         Ok(o) => match o.get("BucketName") {
             Some(s) => return s.to_string(),
             None => panic!("Stack {} already exists, but is missing a BucketName output", STACK_NAME),
@@ -53,7 +53,7 @@ pub async fn create_bucket_stack() -> String {
     if let Err(e) = create_or_update_stack(&client, STACK_NAME, &template_body).await {
         panic!("Failed to create {STACK_NAME} stack\n{e}");
     }
-    let outputs = match wait_for_output(&client, STACK_NAME).await {
+    let outputs = match wait_for_output(&client, STACK_NAME, None).await {
         Ok(o) => o,
         Err(e) => panic!("Failed to get outputs for {STACK_NAME}\n{}", e),
     };
@@ -136,7 +136,7 @@ pub async fn setup_lambda(data: &mut Vec<String>) {
     println!("Uploading Lambdas Function Artifacts...");
     for stack_str in data {
         let mut stack: aws_cfn_stack::SavedStack = cfn_resources::serde_json::from_str(&stack_str).expect("Failed to deserialize generated json file");
-        for (_stack_name, template) in stack.template.iter_mut() {
+        for (_stack_name, (_, template)) in stack.template.iter_mut() {
             for (resource_name, resource) in template.resources.iter_mut() {
                 if let Some((mut bucket_name, mut obj_key)) = get_function_code_location(resource) {
                     // this lambda function doesnt have a bucket name yet, so we set it

@@ -2,7 +2,7 @@ use std::{io::Write, collections::HashMap};
 
 use hira_lib::level0::*;
 use aws_config;
-use aws_sdk_cloudformation::{self, types::{Stack, Capability, OnFailure}};
+use aws_sdk_cloudformation::{self, types::{Stack, Capability, OnFailure, StackResourceSummary}};
 
 use crate::aws_cfn_stack::SavedTemplate;
 
@@ -10,37 +10,49 @@ pub async fn runtime_main(data: &Vec<String>) {
     // // TODO: allow user to customize region.
     let shared_config = aws_config::from_env().load().await;
     let client = aws_sdk_cloudformation::Client::new(&shared_config);
-    let mut stack_map: HashMap<String, Vec<aws_cfn_stack::SavedTemplate>> = HashMap::new();
-
+    let mut stack_map: HashMap<String, Vec<(String, aws_cfn_stack::SavedTemplate)>> = HashMap::new();
+    let mut num_resources = 0;
     for stack_str in data {
         let stack: aws_cfn_stack::SavedStack = cfn_resources::serde_json::from_str(&stack_str).expect("Failed to deserialize generated json file");
-        for (stack_name, template) in stack.template {
+        for (stack_name, (mod_name, template)) in stack.template {
+            num_resources += template.resources.len();
             if let Some(existing) = stack_map.get_mut(&stack_name) {
-                existing.push(template);
+                existing.push((mod_name, template));
             } else {
-                stack_map.insert(stack_name, vec![template]);
+                stack_map.insert(stack_name, vec![(mod_name, template)]);
             }
             // stack.template is guaranteed to only have 1 template, we can break here
             break;
         }
     }
+    println!("\nDeploying {} resource(s)", num_resources);
+    println!("Across {} stack(s)", stack_map.len());
 
     for (stack_name, templates) in stack_map {
-        println!("About to deploy stack: {stack_name}");
+        println!("\nAbout to deploy stack: {stack_name}");
         let mut final_template = SavedTemplate::default();
-        for template in templates {
+        let mut module_resources: HashMap<String, (ModResourceCounts, Vec<(bool, String)>)> = HashMap::new();
+        for (mod_name, template) in templates {
+            for (resource_name, _) in template.resources.iter() {
+                if let Some((_, existing)) = module_resources.get_mut(&mod_name) {
+                    existing.push((false, resource_name.to_string()));
+                } else {
+                    let mod_resource_counts = ModResourceCounts {
+                        complete_count: 0,
+                        has_changes: true,
+                    };
+                    module_resources.insert(mod_name.to_string(), (mod_resource_counts, vec![(false, resource_name.to_string())]));
+                }
+            }
             final_template.resources.extend(template.resources);
             final_template.outputs.extend(template.outputs);
-        }
-        for (_, resource) in final_template.resources.iter() {
-            println!("{:#?}", resource.properties);
         }
         // we make it pretty so if a user needs to look at the stack in Cfn console, it looks nice
         let template_body = cfn_resources::serde_json::to_string_pretty(&final_template).expect("Failed to serialize template");
         if let Err(e) = create_or_update_stack(&client, &stack_name, &template_body).await {
             panic!("Failed to create stack {stack_name}\n{e}");
         }
-        if let Err(e) = wait_for_output(&client, &stack_name).await {
+        if let Err(e) = wait_for_output(&client, &stack_name, Some(&mut module_resources)).await {
             panic!("Failed to create stack {stack_name}\n{e}");
         }
     }
@@ -127,15 +139,63 @@ pub async fn describe_stack(client: &aws_sdk_cloudformation::Client, name: &str)
     }
 }
 
+pub async fn get_all_stack_resources(
+    client: &aws_sdk_cloudformation::Client, name: &str,
+    mut next_token: Option<String>,
+) -> Result<Vec<StackResourceSummary>, String> {
+    let mut append = vec![];
+    loop {
+        let mut builder = client
+            .list_stack_resources().stack_name(name);
+        if let Some(s) = next_token {
+            builder = builder.next_token(s);
+        }
+        let resp = builder.send().await.map_err(|e| e.to_string())?;
+        
+        let list = resp.stack_resource_summaries().unwrap_or_default();
+        for item in list {
+            append.push(item.clone());
+        }
+        if let Some(nt) = resp.next_token() {
+            next_token = Some(nt.to_string());
+        } else {
+            break;
+        }
+    }
+    Ok(append)
+}
 
-pub async fn wait_for_output(client: &aws_sdk_cloudformation::Client, name: &str) -> Result<HashMap<String, String>, String> {
+pub struct ModResourceCounts {
+    pub complete_count: u32,
+    pub has_changes: bool,
+}
+
+impl ModResourceCounts {
+    pub fn set_complete_count(&mut self, num_complete: u32) {
+        if self.complete_count != num_complete {
+            self.has_changes = true;
+        }
+        self.complete_count = num_complete;
+    }
+
+    pub fn print(&mut self, mod_name: &str, total_resources: usize) {
+        if self.has_changes {
+            println!("{mod_name}\t\t{}/{}", self.complete_count, total_resources);
+        }
+        self.has_changes = false;
+    }
+}
+
+pub async fn wait_for_output(
+    client: &aws_sdk_cloudformation::Client, name: &str,
+    mut module_resources: Option<&mut HashMap<String, (ModResourceCounts, Vec<(bool, String)>)>>,
+) -> Result<HashMap<String, String>, String> {
     loop {
         let dur = tokio::time::Duration::from_millis(700);
         tokio::time::sleep(dur).await;
         let stack_resp = describe_stack(client, name).await?;
         match stack_resp {
             Some(stack) => {
-                println!("");
                 let mut out = HashMap::new();
                 for output in stack.outputs().unwrap_or_default() {
                     match (output.output_key(), output.output_value()) {
@@ -145,12 +205,66 @@ pub async fn wait_for_output(client: &aws_sdk_cloudformation::Client, name: &str
                         _ => {}
                     }
                 }
+                if let Some(mod_data) = &mut module_resources {
+                    for (mod_name, (counts, resources)) in mod_data.iter_mut() {
+                        let num_resources = resources.len();
+                        counts.set_complete_count(num_resources as _);
+                        counts.print(mod_name, num_resources);
+                    }
+                }
                 return Ok(out);
             }
             None => {
-                // still waiting
-                print!(".");
-                let _ = std::io::stdout().flush();
+                // only print if module resources provided:
+                let mod_resources = if let Some(r) = &mut module_resources {
+                    r
+                } else {
+                    continue;
+                };
+                // should print all 0s first before we get the data
+                for (mod_name, (counts, resources)) in mod_resources.iter_mut() {
+                    counts.print(&mod_name, resources.len());
+                }
+
+                // stack not ready yet.
+                // print output of all the modules and how many
+                // of their resources have been created
+                // this is best effort, so if we fail, we just ignore
+                let all_resources = if let Ok(o) = get_all_stack_resources(client, name, None).await {
+                    o
+                } else {
+                    continue;
+                };
+                // build a map of logical resource names
+                // to their status
+                let mut map = HashMap::new();
+                for resource in all_resources.iter() {
+                    if let Some(id) = resource.logical_resource_id() {
+                        if let Some(status) = resource.resource_status() {
+                            map.insert(id, status);
+                        }
+                    }
+                }
+                // finally, iterate and print
+                for (mod_name, (counts, resource_ids)) in mod_resources.iter_mut() {
+                    let num_resources = resource_ids.len();
+                    // count how many of the resource ids are complete:
+                    let mut complete_count = 0;
+                    for (_, id) in resource_ids {
+                        if let Some(status) = map.get(id.as_str()) {
+                            match status {
+                                // TODO: should allow other statuses to count as complete?
+                                // update complete? etc.
+                                aws_sdk_cloudformation::types::ResourceStatus::CreateComplete => {
+                                    complete_count += 1;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    counts.set_complete_count(complete_count);
+                    counts.print(&mod_name, num_resources);
+                }
             }
         }
     }
@@ -159,8 +273,7 @@ pub async fn wait_for_output(client: &aws_sdk_cloudformation::Client, name: &str
 pub async fn create_or_update_stack(client: &aws_sdk_cloudformation::Client, name: &str, body: &str) -> Result<(), String> {
     let exists = does_stack_exist(client, name).await?;
     if exists {
-        print!("Updating {name} ...");
-        let _ = std::io::stdout().flush();
+        println!("Updating {name} ...");
         // update
         match client
             .update_stack()
@@ -181,8 +294,7 @@ pub async fn create_or_update_stack(client: &aws_sdk_cloudformation::Client, nam
             }
         }
     } else {
-        print!("Creating {name} ...");
-        let _ = std::io::stdout().flush();
+        println!("Creating {name} ...");
         // create
         client
             .create_stack()
@@ -259,7 +371,7 @@ pub mod aws_cfn_stack {
         /// this is expected to only have 1 item.
         /// we structure it this way so that we can separate the stack name
         /// from the template
-        pub template: std::collections::HashMap<String, SavedTemplate>,
+        pub template: std::collections::HashMap<String, (String, SavedTemplate)>,
     }
 
     #[derive(Default)]
@@ -291,9 +403,9 @@ pub mod aws_cfn_stack {
         Ok(out_template)
     }
 
-    fn get_serialized_stack_json(stack_name: &String, template: SavedTemplate) -> Result<String, String> {
+    fn get_serialized_stack_json(user_mod_name: String, stack_name: &String, template: SavedTemplate) -> Result<String, String> {
         let mut stack = SavedStack::default();
-        stack.template.insert(stack_name.clone(), template);
+        stack.template.insert(stack_name.clone(), (user_mod_name, template));
         match cfn_resources::serde_json::to_string(&stack) {
             Err(e) => {
                 Err(format!("Failed to serialize template\n{:#?}", e))
@@ -341,7 +453,7 @@ pub mod aws_cfn_stack {
                 return core.compiler_error(&e);
             }
         };
-        let output = match get_serialized_stack_json(&stack_name, out_template) {
+        let output = match get_serialized_stack_json(user_mod_name, &stack_name, out_template) {
             Ok(s) => s,
             Err(e) => {
                 return core.compiler_error(&e);
