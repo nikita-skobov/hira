@@ -272,6 +272,47 @@ impl HiraConfig {
     }
 
     #[cfg(feature = "wasm")]
+    pub fn run_build_runtime_cmd(
+        meta: &RuntimeMeta,
+        runtime_name: &str, path: &str,
+        target_dir: &str, crate_name: &str,
+        output_file: &str
+    ) -> Result<(), String> {
+        use std::process::Command;
+
+        let cargo_cmd = if meta.cargo_cmd.is_empty() { "cargo" } else { meta.cargo_cmd.as_str() };
+        let profile = if meta.profile.is_empty() { "dev" } else { meta.profile.as_str() };
+
+        // let mut a
+        let rustflags = format!("--cfg {runtime_name} -C strip=symbols");
+        let mut args = vec![
+            "rustc", "--crate-type=bin",
+            "--profile", profile,
+            "--target-dir", target_dir,
+        ];
+        let mut target_location = "".to_string();
+        if !meta.target.is_empty() {
+            args.push("--target");
+            args.push(&meta.target);
+            target_location = format!("{}/", meta.target);
+        }
+        let location = if meta.profile.is_empty() {
+            "debug"
+        } else {
+            meta.profile.as_str()
+        };
+        let cmd_out = Command::new(cargo_cmd)
+            .env("CARGO_WASMTYPEGEN_FILEOPS", "\"0\"")
+            .env("RUSTFLAGS", &rustflags)
+            .args(args).output().map_err(|e| format!("Failed to compile runtime {runtime_name}\n{:?}", e))?;
+        if !cmd_out.status.success() {
+            let err_str = String::from_utf8_lossy(&cmd_out.stderr).to_string();
+            return Err(err_str);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "wasm")]
     fn append_to_build_script(
         meta: &RuntimeMeta,
         runtime_name: &str, path: &str,
