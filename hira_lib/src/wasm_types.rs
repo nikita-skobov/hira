@@ -57,10 +57,22 @@ pub fn get_wasm_output(
 ) -> Option<LibraryObj> {
     let _ = std::fs::create_dir_all(wasm_out_dir);
     let now = std::time::Instant::now();
-    let out_file = wasm_type_gen::compile_strings_to_wasm_with_extern_crates(
+    // try to compile twice. first time with cache.
+    // 2nd time force recompilation of dependency crates.
+    // if still fails, then we error
+    let mut res = wasm_type_gen::compile_strings_to_wasm_with_extern_crates(
         code, extern_crates,
-        wasm_out_dir, custom_codegen_opts
-    ).expect("compilation error");
+        wasm_out_dir, custom_codegen_opts.clone(),
+        Some(logfile), false,
+    );
+    if res.is_err() {
+        res = wasm_type_gen::compile_strings_to_wasm_with_extern_crates(
+            code, extern_crates,
+            wasm_out_dir, custom_codegen_opts,
+            Some(logfile), true,
+        );
+    }
+    let out_file = res.expect("compilation failure");
     let elapsed = now.elapsed().as_millis();
     let contents = format!("COMPILE_STRINGS_TO_WASM_WITH_EXTERN_CRATES {}, dur={}ms\n", name, elapsed);
     print_debug(logfile, contents);
