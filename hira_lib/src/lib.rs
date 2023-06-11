@@ -415,6 +415,13 @@ fi
                 }
             }
         }
+        if self.crate_name == "UNKNOWN_CRATE_NAME" {
+            if let Some(package) = value.get("package") {
+                if let Some(toml::Value::String(s)) = package.get("name") {
+                    self.crate_name = s.to_string();
+                }
+            }
+        }
         self.known_cargo_dependencies = dependencies;
     }
 }
