@@ -11,7 +11,7 @@ syn = { version = "2", features = ["extra-traits"] }
 quote = "1"
 serde = { version = "1.0.162", features = ["derive"] }
 serde_json = "1.0.96"
-wasm_type_gen = { git = "https://github.com/nikita-skobov/wasm_type_gen", rev = "a67fea20ae2acc2e7e85b560f13a934e0246abe1", optional = true }
+wasm_type_gen = { git = "https://github.com/nikita-skobov/wasm_type_gen", rev = "d7f06a972c604568e17eb1d65c776c6eaba9943e", optional = true }
 adler32 = { version = "*", optional = true }
 toml = { version = "0.7.3", optional = true }
 prettyplease = "0.2.6"
