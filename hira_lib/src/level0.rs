@@ -136,6 +136,7 @@ pub struct L0RuntimeCreator {
     current_module_name: String,
     runtime_base_path: String,
     runtimes: std::collections::HashMap<String, RuntimeData>,
+    depends_on: std::collections::HashMap<String, Vec<String>>,
 }
 
 #[derive(WasmTypeGen, Debug)]
@@ -388,6 +389,13 @@ impl L0RuntimeCreator {
     pub fn apply_changes(&mut self, conf: &mut HiraConfig, module: &mut HiraModule2, stream: &mut TokenStream) -> Result<(), TokenStream> {
         let mut params = get_all_capability_params(conf, &module, &["RUNTIME"]);
         let runtime_params = params.remove("RUNTIME").unwrap();
+        for (runtime_name, depends_on) in self.depends_on.drain() {
+            if let Some(existing) = conf.runtime_depends_on.get_mut(&runtime_name) {
+                existing.extend(depends_on);
+            } else {
+                conf.runtime_depends_on.insert(runtime_name, depends_on);
+            }
+        }
         for (runtime_name, runtime_info) in self.runtimes.drain() {
             let mut beginnings = vec![];
             let mut nones = vec![];
@@ -713,7 +721,16 @@ impl L0Core {
 #[output_and_stringify_basic_const(RUNTIME_IMPL)]
 impl L0RuntimeCreator {
     pub fn new() -> Self {
-        Self { current_module_name: Default::default(), runtimes: Default::default(), runtime_base_path: Default::default() }
+        Self { current_module_name: Default::default(), runtimes: Default::default(), runtime_base_path: Default::default(), depends_on: Default::default() }
+    }
+    /// set a dependency of your runtime such that
+    /// during build, your runtime (`runtime_name`) will be compiled prior to `depends_on`
+    pub fn depends_on(&mut self, runtime_name: &str, depends_on: &str) {
+        if let Some(existing) = self.depends_on.get_mut(depends_on) {
+            existing.push(runtime_name.to_string());
+        } else {
+            self.depends_on.insert(depends_on.to_string(), vec![runtime_name.to_string()]);
+        }
     }
     pub fn get_full_runtime_path(&self, name: &str) -> String {
         format!("{}/{}", self.runtime_base_path, name)

@@ -70,6 +70,11 @@ pub struct HiraConfig {
     pub runtimes: HashMap<String, (bool, RuntimeMeta, Vec<String>, Vec<String>)>,
     #[cfg(not(feature = "wasm"))]
     pub runtimes: HashMap<String, String>,
+
+    /// the key is the dependency runtime name, and the value
+    /// are the runtime names that depend on that dependency
+    pub runtime_depends_on: HashMap<String, Vec<String>>,
+
     pub has_deleted_build_script: bool,
 }
 
@@ -789,6 +794,63 @@ pub mod e2e_tests {
         let conf = e2e_module2_run(&code, |_| {}).expect("Failed to compile");
         let module = conf.get_mod2("mylevel3mod").expect("Failed to find mylevel3mod");
         assert_eq!(module.resolved_outputs["REGION"], "eu-west-1");
+    }
+
+    #[test]
+    fn mod2_runtimes_can_depend_on_others() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod1 {
+                    use super::L0RuntimeCreator;
+                    #[derive(Default)]
+                    pub struct Input {}
+                    pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[("RUNTIME", &[""])];
+                    pub fn config(input: &mut Input, l0: &mut L0RuntimeCreator) {
+                        l0.add_to_runtime("hello", "world();".to_string());
+                    }
+                }
+            ),
+            stringify!(
+                pub mod lvl2mod2_other {
+                    use super::L0RuntimeCreator;
+                    #[derive(Default)]
+                    pub struct Input {}
+                    pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[("RUNTIME", &[""])];
+                    pub fn config(input: &mut Input, l0: &mut L0RuntimeCreator) {
+                        l0.add_to_runtime("my_runtime2", "world();".to_string());
+                        l0.depends_on("my_runtime2", "hello");
+                    }
+                }
+            ),
+            stringify!(
+                pub mod lvl2mod2 {
+                    use super::L0RuntimeCreator;
+                    #[derive(Default)]
+                    pub struct Input {}
+                    pub const CAPABILITY_PARAMS: &[(&str, &[&str])] = &[("RUNTIME", &[""])];
+                    pub fn config(input: &mut Input, l0: &mut L0RuntimeCreator) {
+                        l0.add_to_runtime("my_runtime", "world();".to_string());
+                        l0.depends_on("my_runtime", "hello");
+                    }
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod2;
+                    pub fn config(input: &mut lvl2mod2::Input) {}
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod2 {
+                    use super::lvl2mod2_other;
+                    pub fn config(input: &mut lvl2mod2_other::Input) {}
+                }
+            ),
+        ];
+        let conf = e2e_module2_run(&code, |_| {}).expect("Failed to compile");
+        let _module = conf.get_mod2("mylevel3mod").expect("Failed to find mylevel3mod");
+        assert_eq!(conf.runtime_depends_on["hello"][0], "my_runtime");
+        assert_eq!(conf.runtime_depends_on["hello"][1], "my_runtime2");
     }
 
     #[test]
