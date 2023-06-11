@@ -416,6 +416,7 @@ pub mod h_aws_lambda {
             format!("{user_mod_name}::entrypoint().await.expect(\"Lambda Error\")"),
             RuntimeMeta { cargo_cmd: "cross".to_string(), target: inp.architecture.to_string(), profile: "release".to_string() }
         );
+        runtimer.depends_on(&user_mod_name, "deploy");
         let lambda_executable_path = runtimer.get_full_runtime_path(&user_mod_name);
 
         let mut default_statements = vec![
