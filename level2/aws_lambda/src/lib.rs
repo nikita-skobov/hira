@@ -334,7 +334,7 @@ pub mod h_aws_lambda {
 
     #[hira::hiracfg(editor)]
     /// example fn
-    pub fn lambda_main(something: FunctionUrlEvent) -> FunctionUrlResponse {
+    pub fn lambda_main(_something: FunctionUrlEvent) -> FunctionUrlResponse {
         todo!()
     }
 
