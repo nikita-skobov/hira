@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::fmt::format;
 
 
 use serde::{Serialize, Deserialize};
@@ -1051,7 +1050,6 @@ pub fn set_outputs(module: &mut HiraModule2, item: &mut syn::ItemMod) {
 }
 
 pub fn add_to_extras(module: &mut HiraModule2, item: TokenStream) {
-    use syn::spanned::Spanned;
     let line = item.span().start().line as u32;
     let contents = item.to_token_stream().to_string();
     module.extra_parsed_items.push((line, contents));

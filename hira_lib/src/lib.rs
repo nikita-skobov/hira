@@ -283,7 +283,7 @@ impl HiraConfig {
     #[cfg(feature = "wasm")]
     pub fn run_build_runtime_cmd(
         meta: &RuntimeMeta,
-        runtime_name: &str, path: &str,
+        runtime_name: &str,
         target_dir: &str, crate_name: &str,
         output_file: &str
     ) -> Result<(), String> {
@@ -318,6 +318,10 @@ impl HiraConfig {
             let err_str = String::from_utf8_lossy(&cmd_out.stderr).to_string();
             return Err(err_str);
         }
+
+        let src_path = format!("{target_dir}/{target_location}{location}/{crate_name}");
+        std::fs::copy(&src_path, output_file)
+            .map_err(|e| format!("Failed to output runtime {} to proper location {}\n{:?}", runtime_name, output_file, e))?;
         Ok(())
     }
 
