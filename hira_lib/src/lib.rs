@@ -44,6 +44,7 @@ pub struct HiraConfig {
     /// saved, and then we can fetch it from the cache directory
     pub module_cache_directory: String,
 
+    pub should_output_build_script: bool,
     pub should_do_file_ops: bool,
     pub known_cargo_dependencies: HashSet<String>,
     pub shared_data: HashMap<String, String>,
@@ -137,6 +138,7 @@ impl HiraConfig {
             }
         }
         self.should_do_file_ops = should_do;
+        self.should_output_build_script = should_do;
     }
 
     #[cfg(feature = "wasm")]
@@ -361,8 +363,10 @@ if [[ $profile == "dev" ]]; then
     location="debug"
 fi
 "#);
-            std::fs::write(&self.build_script_path, out)
-                .map_err(|e| compiler_error(&format!("Failed to create build script at {}\n{:?}", self.build_script_path, e)))?;
+            if self.should_output_build_script {
+                std::fs::write(&self.build_script_path, out)
+                    .map_err(|e| compiler_error(&format!("Failed to create build script at {}\n{:?}", self.build_script_path, e)))?;
+            }
         }
         for (runtime_name, (already_output, meta, code, data)) in self.runtimes.iter_mut() {
             let (tokens, runtime_include_file, runtime_data_include_file) = Self::generate_runtime_entrypoint(runtime_name, &self.wasm_directory)?;
@@ -372,7 +376,7 @@ fi
                 *already_output = true;
                 let target_dir = format!("{}/target_{}", self.wasm_directory, runtime_name);
                 let hira_runtime_output_path = format!("{}/{}", self.runtime_directory, runtime_name);
-                if self.should_do_file_ops {
+                if self.should_output_build_script {
                     Self::append_to_build_script(meta, runtime_name, &self.build_script_path, &target_dir, &self.crate_name, &hira_runtime_output_path)?;
                 }
             }
