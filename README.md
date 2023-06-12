@@ -1,4 +1,4 @@
-# hira
+# Hira
 Homoiconic Rust Actions
 
 ### What is 'Homoiconic'?
