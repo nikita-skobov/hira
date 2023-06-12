@@ -197,11 +197,13 @@ pub mod h_aws_lambda {
     extern crate cfn_resources;
     use super::FunctionSignature;
     use super::aws_cfn_stack;
+    use self::aws_cfn_stack::ResourceOutput;
     use super::L0RuntimeCreator;
     use super::L0CodeWriter;
     use super::L0CodeReader;
     use super::L0Core;
     use super::RuntimeMeta;
+    use self::cfn_resources::get_att;
     use self::cfn_resources::ToOptStrVal;
     use self::cfn_resources::serde_json::Value;
     use self::cfn_resources::StrVal;
@@ -483,6 +485,13 @@ pub mod h_aws_lambda {
         if inp.role_arn.is_empty() {
             stackinp.resources.push(role_resource);
         }
+        let arn_output_name = format!("LambdaFunctionArn{}", user_mod_name);
+        let arn_output_name = arn_output_name.replace("_", "");
+        let resource_out = ResourceOutput {
+            description: "".to_string(),
+            value: get_att(&logical_fn_name, "Arn")
+        };
+        stackinp.outputs.insert(arn_output_name, resource_out);
 
         if inp.use_function_url {
             let func_url = lambda::url::CfnUrl {
@@ -510,6 +519,15 @@ pub mod h_aws_lambda {
             };
             stackinp.resources.push(permission_resource);
             stackinp.resources.push(url_resource);
+
+            let arn_output_name = format!("LambdaFunctionUrl{}", user_mod_name);
+            let arn_output_name = arn_output_name.replace("_", "");
+            let resource_out = ResourceOutput {
+                description: "".to_string(),
+                value: get_att(&logical_url_name, "FunctionUrl")
+            };
+            stackinp.outputs.insert(arn_output_name, resource_out);
+
             l0core.set_output("LOGICAL_FUNCTION_URL_NAME", &logical_url_name);
         }
     }

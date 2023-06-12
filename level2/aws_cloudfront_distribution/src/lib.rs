@@ -16,8 +16,10 @@ pub mod aws_cloudfront_distribution {
 
     use super::L0Core;
     use super::aws_cfn_stack;
+    use self::aws_cfn_stack::ResourceOutput;
     use self::cfn_resources::StrVal;
     use self::cfn_resources::ToOptStrVal;
+    use self::cfn_resources::get_ref;
     pub use self::cloud_front::distribution::Origin;
     pub use self::cloud_front::distribution::CfnDistribution;
     pub use self::cloud_front::distribution::CustomOriginConfig;
@@ -236,6 +238,13 @@ pub mod aws_cloudfront_distribution {
                     name: logical_r53_resource_name.clone(),
                     properties: Box::new(record_set) as _,
                 };
+                let output_name = format!("Route53Record{}", user_mod_name);
+                let output_name = output_name.replace("_", "");
+                let output = ResourceOutput {
+                    description: "".to_string(),
+                    value: get_ref(&logical_r53_resource_name),
+                };
+                stackinp.outputs.insert(output_name, output);
                 Some(resource)
             } else {
                 None
@@ -298,6 +307,14 @@ pub mod aws_cloudfront_distribution {
         stackinp.resources.push(resource);
         if let Some(route53resource) = route53_resource {
             stackinp.resources.push(route53resource);
+        } else {
+            let output_name = format!("CloudfrontDomainName{}", user_mod_name);
+            let output_name = output_name.replace("_", "");
+            let output = ResourceOutput {
+                description: "".to_string(),
+                value: get_ref(&logical_distr_name),
+            };
+            stackinp.outputs.insert(output_name, output);
         }
         l0core.set_output("LOGICAL_DISTR_NAME", &logical_distr_name);
     }

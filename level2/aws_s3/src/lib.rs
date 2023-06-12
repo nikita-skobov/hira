@@ -13,10 +13,10 @@ pub mod aws_s3 {
     extern crate lambda;
     extern crate iam;
     extern crate cfn_resources;
-    
-    
+
     use super::L0Core;
     use super::aws_cfn_stack;
+    use self::aws_cfn_stack::ResourceOutput;
     use self::cfn_resources::get_att;
     use self::cfn_resources::get_ref;
     use self::cfn_resources::create_policy_doc;
@@ -126,6 +126,13 @@ pub mod aws_s3 {
             name: logical_bucket_name.clone(),
             properties: Box::new(bucket) as _,
         };
+        let output_name = format!("S3Arn{}", user_mod_name);
+        let output_name = output_name.replace("_", "");
+        let resource_out = ResourceOutput {
+            description: "".to_string(),
+            value: get_att(&logical_bucket_name, "Arn")
+        };
+        stackinp.outputs.insert(output_name, resource_out);
         stackinp.resources.push(resource);
         if myinput.is_website {
             let mut resource_sub = cfn_resources::serde_json::Map::new();
@@ -145,6 +152,13 @@ pub mod aws_s3 {
                 name: logical_policy_name.clone(),
                 properties: Box::new(bucket_policy) as _,
             };
+            let output_name = format!("S3WebsiteUrl{}", user_mod_name);
+            let output_name = output_name.replace("_", "");
+            let resource_out = ResourceOutput {
+                description: "".to_string(),
+                value: get_att(&logical_bucket_name, "WebsiteURL")
+            };
+            stackinp.outputs.insert(output_name, resource_out);
             stackinp.resources.push(resource);
         }
 

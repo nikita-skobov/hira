@@ -1,4 +1,4 @@
-use std::{io::Write, collections::HashMap};
+use std::collections::HashMap;
 
 use hira_lib::level0::*;
 use aws_config;
@@ -52,8 +52,19 @@ pub async fn runtime_main(data: &Vec<String>) {
         if let Err(e) = create_or_update_stack(&client, &stack_name, &template_body).await {
             panic!("Failed to create stack {stack_name}\n{e}");
         }
-        if let Err(e) = wait_for_output(&client, &stack_name, Some(&mut module_resources)).await {
-            panic!("Failed to create stack {stack_name}\n{e}");
+        let mut outputs = match wait_for_output(&client, &stack_name, Some(&mut module_resources)).await {
+            Err(e) => panic!("Failed to create stack {stack_name}\n{e}"),
+            Ok(o) => o,
+        };
+        let mut outputs: Vec<(String, String)> = outputs.drain().map(|(k, v)| {
+            (k, v)
+        }).collect();
+        outputs.sort_by(|a, b| a.0.cmp(&b.0));
+        if !outputs.is_empty() {
+            println!("\nOutputs:");
+            for (key, val) in outputs {
+                println!("- {}:\n  {}", key, val);
+            }
         }
     }
 
@@ -347,7 +358,7 @@ pub mod aws_cfn_stack {
         pub outputs: std::collections::HashMap<String, ResourceOutput>,
     }
 
-    #[derive(Debug, cfn_resources::serde::Serialize, cfn_resources::serde::Deserialize)]
+    #[derive(Debug, Clone, cfn_resources::serde::Serialize, cfn_resources::serde::Deserialize)]
     pub struct ResourceOutput {
         #[serde(rename = "Description")]
         pub description: String,
@@ -386,9 +397,10 @@ pub mod aws_cfn_stack {
         /// a list of function invocations that should be ran
         /// prior to deploying the stack.
         pub run_before: Vec<String>,
+        pub outputs: std::collections::HashMap<String, ResourceOutput>,
     }
 
-    fn validate_resources_to_template(resources: &Vec<Resource>) -> Result<SavedTemplate, String> {
+    fn validate_resources_to_template(resources: &Vec<Resource>, outputs: &std::collections::HashMap<String, ResourceOutput>) -> Result<SavedTemplate, String> {
         let mut out_template = SavedTemplate::default();
         for resource in resources.iter() {
             if let Err(e) = resource.properties.validate() {
@@ -400,6 +412,7 @@ pub mod aws_cfn_stack {
             };
             out_template.resources.insert(resource.name.clone(), saved_resource);
         }
+        out_template.outputs = outputs.clone();
         Ok(out_template)
     }
 
@@ -440,7 +453,7 @@ pub mod aws_cfn_stack {
     }
 
     pub fn config(input: &mut Input, core: &mut L0Core, runtimer: &mut L0RuntimeCreator) {
-        let out_template = match validate_resources_to_template(&input.resources) {
+        let out_template = match validate_resources_to_template(&input.resources, &input.outputs) {
             Ok(t) => t,
             Err(e) => {
                 return core.compiler_error(&e);
