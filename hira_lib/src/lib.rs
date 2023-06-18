@@ -46,8 +46,6 @@ pub struct HiraConfig {
     /// saved, and then we can fetch it from the cache directory
     pub module_cache_directory: String,
 
-    pub wasm32_status: Option<Result<bool, String>>,
-
     pub should_output_build_script: bool,
     pub should_do_file_ops: bool,
     pub known_cargo_dependencies: HashSet<String>,
@@ -563,6 +561,17 @@ pub mod e2e_tests {
         let mut conf = HiraConfig::default();
         #[cfg(feature = "wasm")]
         conf.set_base_code();
+        let status = conf.is_wasm32_unknown_installed();
+        match status {
+            Ok(is_installed) => {
+                if !is_installed {
+                    return Err(compiler_error(&format!("Target wasm32-unknown-unknown is missing. Please install it by running `rustup target add wasm32-unknown-unknown`")));
+                }
+            }
+            Err(e) => {
+                return Err(compiler_error(&format!("Failed to check if wasm32 target is installed\n{:?}", e)));
+            }
+        }
         let path = std::path::PathBuf::from("./test_out");
         let _ = std::fs::create_dir("test_out");
         let path = path.canonicalize().expect("Failed to canonicalize test_out directory");
