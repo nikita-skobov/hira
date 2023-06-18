@@ -512,6 +512,20 @@ impl HiraModule2 {
     }
 
     pub fn verify_config_signature(&mut self, conf: &mut HiraConfig) -> Result<(), TokenStream> {
+        if conf.wasm32_status.is_none() {
+            let status = conf.is_wasm32_unknown_installed();
+            conf.wasm32_status = Some(status.clone());
+            match status {
+                Ok(is_installed) => {
+                    if !is_installed {
+                        return Err(compiler_error(&format!("Target wasm32-unknown-unknown is missing. Please install it by running `rustup target add wasm32-unknown-unknown`")));
+                    }
+                }
+                Err(e) => {
+                    return Err(compiler_error(&format!("Failed to check if wasm32 target is installed\n{:?}", e)));
+                }
+            }
+        }
         if let Some(first_err) = self.errors_during_parsing.first() {
             return Err(compiler_error(
                 &format!("Error during parsing module '{}'\n{}", self.name, first_err)

@@ -46,6 +46,8 @@ pub struct HiraConfig {
     /// saved, and then we can fetch it from the cache directory
     pub module_cache_directory: String,
 
+    pub wasm32_status: Option<Result<bool, String>>,
+
     pub should_output_build_script: bool,
     pub should_do_file_ops: bool,
     pub known_cargo_dependencies: HashSet<String>,
@@ -114,6 +116,27 @@ impl HiraConfig {
         out.set_base_code();
 
         out
+    }
+
+    #[cfg(feature = "wasm")]
+    pub fn is_wasm32_unknown_installed(&self) -> Result<bool, String> {
+        use std::process::Command;
+        let cmd = Command::new("rustup")
+            .arg("target").arg("list").output().map_err(|e| e.to_string())?;
+        if !cmd.status.success() {
+            let err_str = String::from_utf8_lossy(&cmd.stderr).to_string();
+            return Err(err_str);
+        }
+        let data = String::from_utf8_lossy(&cmd.stdout).to_string();
+        for line in data.lines() {
+            if line.contains("wasm32-unknown-unknown") {
+                if line.contains("installed") {
+                    return Ok(true);
+                }
+                return Ok(false)
+            }
+        }
+        Err(format!("rustup ran successfully, but failed to find target wasm32-unknown-unknown"))
     }
 
     #[cfg(feature = "wasm")]
