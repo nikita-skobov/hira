@@ -532,7 +532,7 @@ pub fn use_hira_config(mut cb: impl FnMut(&mut HiraConfig)) {
 pub mod e2e_tests {
     use std::str::FromStr;
     use proc_macro2::TokenStream;
-    use crate::module_loading::{hira_mod2_inner};
+    use crate::module_loading::{hira_mod2_inner, ModuleLevel};
     use super::*;
 
     pub fn assert_contains_str<Q: AsRef<str>, S: AsRef<str>>(search: Q, contains: S) {
@@ -1152,6 +1152,56 @@ pub mod e2e_tests {
         assert_eq!(module.hiracfgs[0].applied_to, "");
     }
 
+    #[test]
+    fn mod2_hirawrapmod_works() {
+        let code = [
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0Core;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub has_error: bool,
+                    }
+                    pub fn config(input: &mut Input, c: &mut L0Core) {
+                        if input.has_error {
+                            c.compiler_error("somebody set has_error!");
+                        }
+                    }
+                }
+            ),
+            stringify!(
+                pub mod lvl2mod_higher {
+                    use super::lvl2mod;
+                    #[derive(Default)]
+                    pub struct Input {}
+                    pub fn config(input: &mut Input, other: &mut lvl2mod::Input) {}
+                }
+            ),
+            stringify!(
+                #[hirawrapmod(lvl2mod)]
+                pub mod lvl2mod_wrapper {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {
+                        input.has_error = true;
+                    }
+                }
+            ),
+            stringify!(
+                #[hirawrap(lvl2mod, lvl2mod_wrapper)]
+                pub mod mylevel3mod {
+                    use super::lvl2mod_higher;
+                    pub fn config(input: &mut lvl2mod_higher::Input) {}
+                }
+            ),
+        ];
+        let (conf, stream) = e2e_module2_run_with_token_stream(&code,|_| {}).expect("Failed to get conf");
+        let module = conf.get_mod2("lvl2mod_wrapper").expect("Failed to get lvl2mod wrapper");
+        assert_eq!(module.level, ModuleLevel::Level2);
+        assert_eq!(module.is_wrapper_of, Some("lvl2mod".to_string()));
+        let module = conf.get_mod2("mylevel3mod").expect("Failed to get mylevel3mod");
+        assert_eq!(module.use_wrappers.as_ref().unwrap()["lvl2mod"][0], "lvl2mod_wrapper");
+        assert_contains_str(stream.to_string(), "somebody set has_error!");
+    }
 
     #[test]
     fn mod2_fn_signature_not_provided_if_not_requested() {

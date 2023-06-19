@@ -2,7 +2,7 @@
 //! token streams into hira specific structures
 //! 
 
-use std::str::FromStr;
+use std::{str::FromStr, collections::HashMap};
 
 use serde::{Serialize, Deserialize};
 
@@ -17,7 +17,7 @@ use syn::{
     ItemConst,
     ItemMod,
     ItemStruct,
-    Expr, ItemUse, Visibility, token::Pub, ItemExternCrate, Meta, ItemImpl, Attribute, Fields
+    Expr, ItemUse, Visibility, token::Pub, ItemExternCrate, Meta, ItemImpl, Attribute, Fields, MetaList
 };
 
 use crate::{module_loading::{HiraModule2, ModuleLevel, parse_module_from_stream}, HiraConfig};
@@ -323,10 +323,70 @@ pub fn iterate_mod_def(
         &[fallback_cb],
     );
     let cfgs = extract_hiracfgs(&mut mod_def.attrs, None);
+    extract_wrappers(&mod_def.attrs, module);
     module.hiracfgs.extend(cfgs);
     // remove attributes, since we dont want to try to compile #[hira]
     mod_def.attrs.clear();
     module.contents = mod_def.to_token_stream().to_string();
+}
+
+pub fn extract_wrappers(attributes: &Vec<Attribute>, module: &mut HiraModule2) {
+    for attr in attributes.iter() {
+        if let Meta::List(l) = &attr.meta {
+            let mut path_string = l.path.to_token_stream().to_string();
+            remove_surrounding_quotes(&mut path_string);
+            if path_string.ends_with("hirawrapmod") {
+                extract_hirawrapmod(l, module);
+            } else if path_string.ends_with("hirawrap") {
+                extract_hirawrap(l, module);
+            }
+        }
+    }
+}
+
+pub fn extract_hirawrapmod(list: &MetaList, module: &mut HiraModule2) {
+    let mut tokens_iter = list.tokens.clone().into_iter();
+    let wrap_module = if let Some(TokenTree::Ident(token)) = tokens_iter.next() {
+        let mut s = token.to_string();
+        remove_surrounding_quotes(&mut s);
+        s            
+    } else {
+        return;
+    };
+    module.is_wrapper_of = Some(wrap_module);
+}
+
+pub fn extract_hirawrap(list: &MetaList, module: &mut HiraModule2) {
+    let mut tokens_iter = list.tokens.clone().into_iter();
+    let wrap_module = if let Some(TokenTree::Ident(token)) = tokens_iter.next() {
+        let mut s = token.to_string();
+        remove_surrounding_quotes(&mut s);
+        s            
+    } else {
+        return
+    };
+    // assume it is punct and ignore.
+    let _ = tokens_iter.next();
+    let wrapper_module = if let Some(TokenTree::Ident(token)) = tokens_iter.next() {
+        let mut s = token.to_string();
+        remove_surrounding_quotes(&mut s);
+        s
+    } else {
+        return
+    };
+    if module.use_wrappers.is_none() {
+        module.use_wrappers = Some(Default::default());
+    }
+    if let Some(map) = &mut module.use_wrappers {
+        match map.get_mut(&wrap_module) {
+            Some(existing) => {
+                existing.push(wrapper_module);
+            }
+            None => {
+                map.insert(wrap_module, vec![wrapper_module]);
+            }
+        }
+    }
 }
 
 pub fn get_ident_string(id: &Ident) -> String {
@@ -549,6 +609,7 @@ pub struct DependencyConfig {
     pub name: String,
     pub level: ModuleLevel,
     pub deps: Vec<DependencyType>,
+    pub wrapper_mod_names: Vec<String>,
 }
 
 impl DependencyConfig {
@@ -575,8 +636,14 @@ impl DependencyConfig {
                 }
             };
         }
+        let mut wrappers = vec![];
+        for wrapper in self.wrapper_mod_names.iter() {
+            let wrapper_modname_ident = format_ident!("{}", wrapper);
+            wrappers.push(quote!{ #wrapper_modname_ident::config(&mut #first_config_ident); });
+        }
         quote! {
             #(#config_lets)*
+            #(#wrappers)*
             #item_name_ident::config(&mut #first_config_ident, #(#config_pass)*);
 
             #(#recursive)*
@@ -641,14 +708,31 @@ pub fn iter_fields(fields: &Fields, cb: &mut impl FnMut(String, String, String))
     }
 }
 
-pub fn fill_dependency_config(hira_conf: &HiraConfig, name: &str, dep_contents: &mut Vec<TokenStream>) -> Result<DependencyConfig, TokenStream> {
+pub fn fill_dependency_config(
+    hira_conf: &HiraConfig,
+    name: &str,
+    dep_contents: &mut Vec<TokenStream>,
+    use_wrappers: &HashMap<String, Vec<String>>,
+) -> Result<DependencyConfig, TokenStream> {
     let dep_module = hira_conf.get_mod2(name)
         .ok_or(compiler_error(&format!("Failed to find module {}, but this module has not been loaded yet", name)))?;
     let mut out = DependencyConfig {
         name: name.to_string(),
         level: dep_module.level,
         deps: vec![],
+        wrapper_mod_names: vec![],
     };
+    if let Some(list) = use_wrappers.get(name) {
+        // for each wrapper module name, find its module contents and att it to the dep contents:
+        for name in list.iter() {
+            if let Some(module) = hira_conf.get_mod2(&name) {
+                let contents_stream = TokenStream::from_str(&module.contents)
+                    .map_err(|e| compiler_error(&format!("Failed to parse module {} as token stream\n{:?}", module.name, e)))?;
+                dep_contents.push(contents_stream);            
+            }
+        }
+        out.wrapper_mod_names = list.clone();
+    }
     // TODO: add deduplication logic here. lvl2 modules
     // can depend on other lvl2 modules so there could be a circular dependency.
     // which is fine! but we just have to ensure we dont emit the code multiple times.
@@ -659,7 +743,7 @@ pub fn fill_dependency_config(hira_conf: &HiraConfig, name: &str, dep_contents: 
     for dep in dep_module.compile_dependencies.iter() {
         let dep_type = match dep {
             DependencyTypeName::Mod1Or2(s) => {
-                let conf = fill_dependency_config(hira_conf, &s, dep_contents)?;
+                let conf = fill_dependency_config(hira_conf, &s, dep_contents, use_wrappers)?;
                 DependencyType::Mod1or2(conf)
             }
             DependencyTypeName::Library(s) => {
