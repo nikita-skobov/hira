@@ -9,3 +9,13 @@ pub fn hira(attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> pro
 pub fn hiracfg(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     item
 }
+
+#[proc_macro_attribute]
+pub fn hirawrap(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    item
+}
+
+#[proc_macro_attribute]
+pub fn hirawrapmod(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    item
+}

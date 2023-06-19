@@ -108,6 +108,15 @@ pub struct HiraModule2 {
 
     pub hiracfgs: Vec<Hiracfg>,
 
+    /// lvl2 modules that are wrappers of some other lvl2 modules
+    /// will have this field set.
+    pub is_wrapper_of: Option<String>,
+
+    /// lvl3 modules that are annotated with #[hirawrap(A, B)]
+    /// will have this field set where it will be Some(A -> [B, ]).
+    /// there can potentially be multiple wrappers per module.
+    pub use_wrappers: Option<HashMap<String, Vec<String>>>,
+
     /// during parsing we detect which outputs this module has in its use statements.
     /// prior to compiling, we fill in these outputs into the wasm code.
     pub fill_outputs: Vec<OutputType>,
@@ -546,7 +555,8 @@ impl HiraModule2 {
         // - if the signature input is a Self Input (ie &mut Input)
         //   then it must be a lvl2 module
         // - if the signature input is a lvl2 Input (ie &mut some_lvl2_mod::Input)
-        //   then it must be a lvl3 module
+        //   then check if it is a wrapper of some other lvl2 module, if so, this module is also lvl2.
+        //   if it is not a wrapper, then it must be a lvl3 module.
         // - if the signature input is a Level0 module (ie &mut L0...)
         //   then it is invalid, since only level2 modules can use Level0 modules
         //   and level2 modules must contain a Self Input first.
@@ -561,7 +571,9 @@ impl HiraModule2 {
             ));
         }
         if self.config_fn_signature_inputs.len() == 1 {
-            if self.config_fn_signature_inputs[0] == "& mut Input" {
+            if self.is_wrapper_of.is_some() {
+                self.level = ModuleLevel::Level2;
+            } else if self.config_fn_signature_inputs[0] == "& mut Input" {
                 self.level = ModuleLevel::Level2;
             } else if self.compile_dependencies.len() == 1 {
                 match self.compile_dependencies[0] {
@@ -591,24 +603,36 @@ impl HiraModule2 {
         }
 
         if self.level == ModuleLevel::Level2 {
-            if self.input_struct.is_empty() {
-                return Err(compiler_error(
-                    &format!("Detected module {} as {:?}, but it is missing an Input struct. All Level2 modules must contain an Input struct, and reference it in its config function signature", self.name, self.level)
-                ));
-            }
-            if !self.input_struct_has_default {
-                return Err(compiler_error(
-                    &format!("Module {} has an Input struct that is missing a Default implementation. Hira relies on Input structs having a default function. Add a default implementation by adding `#[derive(Default)]` above your input struct, or create a manual default implementation inside your module like `impl Default for Input {{ fn default() -> Self {{ ... }} }}`", self.name)
-                ));
-            }
-            if !self.config_fn_signature_inputs.iter().any(|x| x.contains("& mut Input")) {
-                return Err(compiler_error(
-                    &format!("Detected module {} as {:?}, but its config function signature does not reference its own Input struct. All Level2 modules must reference their Self Input in their config function signatures. Eg: `pub fn config(&mut Input)`", self.name, self.level)
-                ));
+            // if it is a wrapper lvl2 module, then we can skip these checks:
+            if self.is_wrapper_of.is_none() {
+                if self.input_struct.is_empty() {
+                    return Err(compiler_error(
+                        &format!("Detected module {} as {:?}, but it is missing an Input struct. All Level2 modules must contain an Input struct, and reference it in its config function signature", self.name, self.level)
+                    ));
+                }
+                if !self.input_struct_has_default {
+                    return Err(compiler_error(
+                        &format!("Module {} has an Input struct that is missing a Default implementation. Hira relies on Input structs having a default function. Add a default implementation by adding `#[derive(Default)]` above your input struct, or create a manual default implementation inside your module like `impl Default for Input {{ fn default() -> Self {{ ... }} }}`", self.name)
+                    ));
+                }
+                if !self.config_fn_signature_inputs.iter().any(|x| x.contains("& mut Input")) {
+                    return Err(compiler_error(
+                        &format!("Detected module {} as {:?}, but its config function signature does not reference its own Input struct. All Level2 modules must reference their Self Input in their config function signatures. Eg: `pub fn config(&mut Input)`", self.name, self.level)
+                    ));
+                }
             }
             if !self.is_pub {
                 return Err(compiler_error(
                     &format!("Detected module {} as {:?}, but it is not marked public. Level2 modules must be public", self.name, self.level)
+                ));
+            }
+        }
+
+        // if we are a wrapper of another lvl2 module, ensure it exists:
+        if let Some(other_lvl2) = &self.is_wrapper_of {
+            if conf.get_mod2(&other_lvl2).is_none() {
+                return Err(compiler_error(
+                    &format!("Module {} is a wrapper of {}, but {} has not been loaded yet. Ensure the module to be wrapped is loaded before declaring a wrapper of it", self.name, other_lvl2, other_lvl2)
                 ));
             }
         }
@@ -782,6 +806,12 @@ pub fn hira_mod2_inner_ex(
         log_fn(&module.name);
     }
     module.insert_evaluated_outputs(conf)?;
+    // we also want to insert evaluated outputs for wrapper modules:
+    if let Some(wrapper_map) = &module.use_wrappers {
+        for (_, wrapper_names) in wrapper_map {
+            conf.insert_evaluated_outputs_for(wrapper_names)?;
+        }
+    }
     let codes = get_wasm_code_to_compile2(conf, &module)?;
     let extern_dependencies = get_all_extern_crates(conf, &mut module);
     let mut pass_this = LibraryObj::new();

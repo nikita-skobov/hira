@@ -1,4 +1,4 @@
-use std::{str::FromStr};
+use std::{str::FromStr, collections::HashMap};
 
 use proc_macro2::{TokenStream};
 use wasm_type_gen::*;
@@ -97,7 +97,9 @@ pub fn get_wasm_code_to_compile2(
     let mut dependency_mod_defs = vec![];
 
     let l2_dep_name = hira_module_lvl3.level3_get_depends_on(hira_module_lvl3.lvl3_module_depends_on.as_ref())?;
-    let dependency_config = fill_dependency_config(hira_conf, &l2_dep_name, &mut dependency_mod_defs)?;
+    let use_wrappers_default = HashMap::new();
+    let use_wrappers = hira_module_lvl3.use_wrappers.as_ref().unwrap_or(&use_wrappers_default);
+    let dependency_config = fill_dependency_config(hira_conf, &l2_dep_name, &mut dependency_mod_defs, use_wrappers)?;
 
     let hira_base_code = hira_conf.hira_base_code.clone();
     let module_code = quote! {
