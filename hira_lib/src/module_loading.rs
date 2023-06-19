@@ -806,6 +806,12 @@ pub fn hira_mod2_inner_ex(
         log_fn(&module.name);
     }
     module.insert_evaluated_outputs(conf)?;
+    // we also want to insert evaluated outputs for wrapper modules:
+    if let Some(wrapper_map) = &module.use_wrappers {
+        for (_, wrapper_names) in wrapper_map {
+            conf.insert_evaluated_outputs_for(wrapper_names)?;
+        }
+    }
     let codes = get_wasm_code_to_compile2(conf, &module)?;
     let extern_dependencies = get_all_extern_crates(conf, &mut module);
     let mut pass_this = LibraryObj::new();

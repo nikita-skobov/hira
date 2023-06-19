@@ -82,6 +82,15 @@ impl HiraConfig {
     pub fn get_mod2(&self, name: &str) -> Option<&module_loading::HiraModule2> {
         self.modules2.get(name)
     }
+    pub fn insert_evaluated_outputs_for(&mut self, mod_names: &Vec<String>) -> Result<(), TokenStream> {
+        for name in mod_names.iter() {
+            if let Some(mut existing) = self.modules2.remove(name) {
+                existing.insert_evaluated_outputs(self)?;
+                self.modules2.insert(name.clone(), existing);
+            }
+        }
+        Ok(())
+    }
     #[cfg(feature = "wasm")]
     fn add_to_runtime(&mut self, runtime_name: String, meta: RuntimeMeta, runtime_code: String, unique_code: bool) {
         if let Some((_, _, existing, _)) = self.runtimes.get_mut(&runtime_name) {
@@ -1183,6 +1192,88 @@ pub mod e2e_tests {
                     use super::lvl2mod;
                     pub fn config(input: &mut lvl2mod::Input) {
                         input.has_error = true;
+                    }
+                }
+            ),
+            stringify!(
+                #[hirawrap(lvl2mod, lvl2mod_wrapper)]
+                pub mod mylevel3mod {
+                    use super::lvl2mod_higher;
+                    pub fn config(input: &mut lvl2mod_higher::Input) {}
+                }
+            ),
+        ];
+        let (conf, stream) = e2e_module2_run_with_token_stream(&code,|_| {}).expect("Failed to get conf");
+        let module = conf.get_mod2("lvl2mod_wrapper").expect("Failed to get lvl2mod wrapper");
+        assert_eq!(module.level, ModuleLevel::Level2);
+        assert_eq!(module.is_wrapper_of, Some("lvl2mod".to_string()));
+        let module = conf.get_mod2("mylevel3mod").expect("Failed to get mylevel3mod");
+        assert_eq!(module.use_wrappers.as_ref().unwrap()["lvl2mod"][0], "lvl2mod_wrapper");
+        assert_contains_str(stream.to_string(), "somebody set has_error!");
+    }
+
+    #[test]
+    fn mod2_hirawrapmod_can_use_outputs() {
+        let code = [
+            stringify!(
+                pub mod somemod1 {
+                    use super::L0Core;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub region: String,
+                    }
+                    pub mod outputs {
+                        pub const REGION: &str = "dsa";
+                    }
+                    pub fn config(input: &mut Input, l0core: &mut L0Core) {
+                        l0core.set_output("REGION", input.region.as_str());
+                    }
+                }
+            ),
+            stringify!(
+                pub mod somemod2 {
+                    use super::somemod1;
+                    pub mod outputs {
+                        pub use somemod1::outputs::*;
+                    }
+                    pub fn config(input: &mut somemod1::Input) {
+                        input.region = "us-east-2".to_string();
+                    }
+                }
+            ),
+            stringify!(
+                pub mod lvl2mod {
+                    use super::L0Core;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub has_error: bool,
+                    }
+                    pub fn config(input: &mut Input, c: &mut L0Core) {
+                        if input.has_error {
+                            c.compiler_error("somebody set has_error!");
+                        }
+                    }
+                }
+            ),
+            stringify!(
+                pub mod lvl2mod_higher {
+                    use super::lvl2mod;
+                    #[derive(Default)]
+                    pub struct Input {}
+                    pub fn config(input: &mut Input, other: &mut lvl2mod::Input) {}
+                }
+            ),
+            stringify!(
+                #[hirawrapmod(lvl2mod)]
+                pub mod lvl2mod_wrapper {
+                    use super::somemod2::outputs::REGION;
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {
+                        // this is set dynamically. we only output an error if we successfully get the
+                        // dynamic value of REGION from another module.
+                        if REGION == "us-east-2" {
+                            input.has_error = true;
+                        }
                     }
                 }
             ),
