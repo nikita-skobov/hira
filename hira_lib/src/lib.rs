@@ -1107,6 +1107,51 @@ pub mod e2e_tests {
         assert_eq!(module.hiracfgs[0].applied_to, "");
     }
 
+    #[test]
+    fn mod2_can_use_hiracfg_values_safely() {
+        let code = [
+            stringify!(
+                #[hiracfg(helloooooo = world)]
+                pub mod lvl2mod {
+                    use super::L0CodeReader;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub fn config(input: &mut Input, l0: &mut L0CodeReader) {}
+                }
+            ),
+            stringify!(
+                #[hiracfg(helloooooo = "world")]
+                pub mod lvl2mod2 {
+                    use super::L0CodeReader;
+                    #[derive(Default)]
+                    pub struct Input {
+                        pub _unused: bool,
+                    }
+                    pub fn config(input: &mut Input, l0: &mut L0CodeReader) {}
+                }
+            ),
+            stringify!(
+                pub mod mylevel3mod {
+                    use super::lvl2mod;
+                    pub fn config(input: &mut lvl2mod::Input) {}
+                }
+            ),
+        ];
+        let res = e2e_module2_run(&code,|_| {});
+        assert!(res.is_ok());
+        let conf = res.unwrap();
+        let module = conf.get_mod2("lvl2mod").expect("Failed to get lvl2mod");
+        assert_eq!(module.hiracfgs[0].key, "helloooooo");
+        assert_eq!(module.hiracfgs[0].value, Some("world".to_string()));
+        assert_eq!(module.hiracfgs[0].applied_to, "");
+        let module = conf.get_mod2("lvl2mod2").expect("Failed to get lvl2mod2");
+        assert_eq!(module.hiracfgs[0].key, "helloooooo");
+        assert_eq!(module.hiracfgs[0].value, Some("world".to_string()));
+        assert_eq!(module.hiracfgs[0].applied_to, "");
+    }
+
 
     #[test]
     fn mod2_fn_signature_not_provided_if_not_requested() {
