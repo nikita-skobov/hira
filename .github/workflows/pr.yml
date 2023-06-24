@@ -10,6 +10,23 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  book_test_and_publish:
+    permissions: write-all
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: install wasm
+      run: rustup target add wasm32-unknown-unknown
+    - name: Test book
+      shell: bash
+      run: cd book && ./test.sh
+#     - name: Create release
+#       env:
+#         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#         tag: ${{ env.MY_DATE }}
+#       run: |
+#         zip -j hira.zip ./target/x86_64-unknown-linux-musl/release/hira_cli
+#         gh release create "$tag" hira.zip
   build_and_test:
     runs-on: ubuntu-latest
     steps:
