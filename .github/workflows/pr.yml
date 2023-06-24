@@ -33,11 +33,12 @@ jobs:
       shell: bash
       run: cross build --release -p hira_cli --target=x86_64-unknown-linux-musl
     - name: get timestamp
-      run: echo "MY_DATE=$(date '+%Y-%m-%d')" >> $GITHUB_ENV
+      run: echo "MY_DATE=$(date '+%Y-%m-%dT%H')" >> $GITHUB_ENV
     - name: Create release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         tag: ${{ env.MY_DATE }}
       run: |
-        gh release create "$tag" ./target/x86_64-unknown-linux-musl/release/hira_cli#hira
+        zip hira.zip ./target/x86_64-unknown-linux-musl/release/hira_cli
+        gh release create "$tag" hira.zip
 
