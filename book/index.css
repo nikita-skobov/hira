@@ -1,0 +1,19 @@
+.compile_fail {
+    border: 1px solid red;
+    position: relative;
+}
+
+.compile_fail::before {
+    content: "";
+    display: block;
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 25%;
+    height: 25%;
+    background-image: url(img/doesntcompile.png);
+    background-repeat: no-repeat;
+    background-position: center center;
+    background-size: cover;
+    z-index: 1;
+}
