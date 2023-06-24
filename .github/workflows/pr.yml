@@ -39,6 +39,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         tag: ${{ env.MY_DATE }}
       run: |
-        zip hira.zip ./target/x86_64-unknown-linux-musl/release/hira_cli
+        zip -j hira.zip ./target/x86_64-unknown-linux-musl/release/hira_cli
         gh release create "$tag" hira.zip
 
