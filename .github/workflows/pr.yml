@@ -19,7 +19,7 @@ jobs:
     - name: tests
       run: cargo test -p hira_lib -- --test-threads=1
   build_and_publish:
-    permissions: read-all|write-all
+    permissions: write-all
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
