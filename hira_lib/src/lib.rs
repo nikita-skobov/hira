@@ -321,7 +321,7 @@ impl HiraConfig {
         runtime_name: &str,
         target_dir: &str, crate_name: &str,
         output_file: &str,
-        stdout_wrapper: Option<fn(String)>,
+        output_wrapper: Option<fn(String)>,
     ) -> Result<(), String> {
         use std::{process::{Command, Stdio}, io::BufRead};
 
@@ -349,22 +349,25 @@ impl HiraConfig {
         let mut cmd_out = Command::new(cargo_cmd)
             .env("RUSTFLAGS", &rustflags)
             .env("CARGO_WASMTYPEGEN_FILEOPS", "0")
-            .stdout(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
             .args(args).spawn()
             .map_err(|e| format!("Failed to compile runtime {runtime_name}\n{:?}", e))?;
-        if let Some(stdout_wrapper) = stdout_wrapper {
-            if let Some(stdout) = cmd_out.stdout.take() {
-                let reader = std::io::BufReader::new(stdout);
-                for line in reader.lines() {
-                    if let Ok(line) = line {
-                        stdout_wrapper(line);
+        let mut err_str = "".to_string();
+        if let Some(stder) = cmd_out.stderr.take() {
+            let reader = std::io::BufReader::new(stder);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    err_str.push_str(&line);
+                    err_str.push('\n');
+                    if let Some(callback) = &output_wrapper {
+                        callback(line);
                     }
                 }
             }
         }
         let cmd_out = cmd_out.wait_with_output().map_err(|e| format!("Failed to compile runtime {runtime_name}\n{:?}", e))?;
         if !cmd_out.status.success() {
-            let err_str = String::from_utf8_lossy(&cmd_out.stderr).to_string();
             return Err(err_str);
         }
 
