@@ -8,7 +8,7 @@ set -e
 # then they all get placed into target/debug/deps, and then theres different versions of the same
 # packages which throws off rustdoc/mdbook.
 
-cargo build -p hira --target-dir ./booktarget
+cargo build -p h_echo --target-dir ./booktarget
 mdbook test -L ./booktarget/debug/deps
 rm -rf ./hira
 rm build.sh
