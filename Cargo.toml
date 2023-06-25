@@ -9,7 +9,7 @@ members = [
     "level2/aws_cfn_stack",
     "level2/aws_s3",
     "level2/aws_cloudfront_distribution",
-    "level2/echo",
+    "level2/h_echo",
 ]
 
 # compile dependencies in release mode
