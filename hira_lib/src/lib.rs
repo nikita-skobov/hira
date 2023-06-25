@@ -320,9 +320,10 @@ impl HiraConfig {
         meta: &RuntimeMeta,
         runtime_name: &str,
         target_dir: &str, crate_name: &str,
-        output_file: &str
+        output_file: &str,
+        stdout_wrapper: Option<fn(String)>,
     ) -> Result<(), String> {
-        use std::process::Command;
+        use std::{process::{Command, Stdio}, io::BufRead};
 
         let cargo_cmd = if meta.cargo_cmd.is_empty() { "cargo" } else { meta.cargo_cmd.as_str() };
         let profile = if meta.profile.is_empty() { "dev" } else { meta.profile.as_str() };
@@ -345,10 +346,23 @@ impl HiraConfig {
         } else {
             meta.profile.as_str()
         };
-        let cmd_out = Command::new(cargo_cmd)
+        let mut cmd_out = Command::new(cargo_cmd)
             .env("RUSTFLAGS", &rustflags)
             .env("CARGO_WASMTYPEGEN_FILEOPS", "0")
-            .args(args).output().map_err(|e| format!("Failed to compile runtime {runtime_name}\n{:?}", e))?;
+            .stdout(Stdio::piped())
+            .args(args).spawn()
+            .map_err(|e| format!("Failed to compile runtime {runtime_name}\n{:?}", e))?;
+        if let Some(stdout_wrapper) = stdout_wrapper {
+            if let Some(stdout) = cmd_out.stdout.take() {
+                let reader = std::io::BufReader::new(stdout);
+                for line in reader.lines() {
+                    if let Ok(line) = line {
+                        stdout_wrapper(line);
+                    }
+                }
+            }
+        }
+        let cmd_out = cmd_out.wait_with_output().map_err(|e| format!("Failed to compile runtime {runtime_name}\n{:?}", e))?;
         if !cmd_out.status.success() {
             let err_str = String::from_utf8_lossy(&cmd_out.stderr).to_string();
             return Err(err_str);
