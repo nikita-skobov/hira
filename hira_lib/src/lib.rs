@@ -398,14 +398,18 @@ impl HiraConfig {
 
     /// forms the main entrypoint tokens for the runtime.
     /// returns (tokens, file name of the runtime statements, file name of the runtime data)
-    fn generate_runtime_entrypoint(runtime_name: &str, directory: &str) -> Result<(TokenStream, String, String), TokenStream> {
+    fn generate_runtime_entrypoint(runtime_name: &str, directory: &str, no_tokio: bool) -> Result<(TokenStream, String, String), TokenStream> {
         let runtime_include_file = format!("{}/{}.rs.txt", directory, runtime_name);
         let runtime_data_include_file = format!("{}/{}_data.rs.txt", directory, runtime_name);
+        let main_line = if no_tokio {
+            "fn main() {"
+        } else {
+            "#[tokio::main]\nasync fn main() {"
+        };
         let tokens = format!(r#"
 #[cfg({runtime_name})]
 #[allow(incomplete_include)]
-#[tokio::main]
-async fn main() {{
+{main_line}
     let d: &[&'static str] = &include!("{runtime_data_include_file}");
     let mut runtime_data: Vec<String> = d.iter().map(|x| x.to_string()).collect();
     include!("{runtime_include_file}");
@@ -459,7 +463,7 @@ fi
             }
         }
         for (runtime_name, (already_output, meta, code, data)) in self.runtimes.iter_mut() {
-            let (tokens, runtime_include_file, runtime_data_include_file) = Self::generate_runtime_entrypoint(runtime_name, &self.wasm_directory)?;
+            let (tokens, runtime_include_file, runtime_data_include_file) = Self::generate_runtime_entrypoint(runtime_name, &self.wasm_directory, meta.no_tokio_async_runtime)?;
             if !*already_output {
                 // write out the runtime main function to the stream:
                 stream.extend(tokens);

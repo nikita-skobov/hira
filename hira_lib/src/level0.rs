@@ -172,6 +172,7 @@ pub struct RuntimeMeta {
     pub cargo_cmd: String,
     pub target: String,
     pub profile: String,
+    pub no_tokio_async_runtime: bool,
 }
 
 #[derive(Default, Debug)]
@@ -741,36 +742,36 @@ impl L0RuntimeCreator {
     /// for example this is valid `my_function()`, same as `my_error_function().expect("error")`
     /// but this would not be valid: `let x = 2;`
     pub fn add_to_runtime(&mut self, runtime_name: &str, code: String) {
-        self.add_to_runtime_ex(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
+        self.add_to_runtime_ex(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default(), no_tokio_async_runtime: Default::default() })
     }
 
     /// same as `add_to_runtime`, but your line of code is ensured to be
     /// added to the beginning of the list of statements
     pub fn add_to_runtime_beginning(&mut self, runtime_name: &str, code: String) {
-        self.add_to_runtime_ex_beginning(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
+        self.add_to_runtime_ex_beginning(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default(), no_tokio_async_runtime: Default::default() })
     }
 
     /// same as `add_to_runtime`, but your line of code is ensured to be
     /// added to the end of the list of statements
     pub fn add_to_runtime_end(&mut self, runtime_name: &str, code: String) {
-        self.add_to_runtime_ex_end(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
+        self.add_to_runtime_ex_end(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default(), no_tokio_async_runtime: Default::default() })
     }
 
     /// same as `add_to_runtime`, but the line of code is guaranteed to be unique in the main function.
     /// use this when your module can be potentially called many times, and you wish to ensure
     /// that your entrypoint only executes this line of code once.
     pub fn add_to_runtime_unique(&mut self, runtime_name: &str, code: String) {
-        self.add_to_runtime_ex_unique(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
+        self.add_to_runtime_ex_unique(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default(), no_tokio_async_runtime: Default::default() })
     }
 
     /// same as `add_to_runtime_unique` but the line of code is added to the beginning
     pub fn add_to_runtime_unique_beginning(&mut self, runtime_name: &str, code: String) {
-        self.add_to_runtime_ex_unique_beginning(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
+        self.add_to_runtime_ex_unique_beginning(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default(), no_tokio_async_runtime: Default::default() })
     }
 
     /// same as `add_to_runtime_unique` but the line of code is added to the end
     pub fn add_to_runtime_unique_end(&mut self, runtime_name: &str, code: String) {
-        self.add_to_runtime_ex_unique_end(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default() })
+        self.add_to_runtime_ex_unique_end(runtime_name, code, RuntimeMeta { cargo_cmd: Default::default(), target: Default::default(), profile: Default::default(), no_tokio_async_runtime: Default::default() })
     }
 
     /// same as `add_to_runtime`, but provide metadata for how this runtime should be compiled.
