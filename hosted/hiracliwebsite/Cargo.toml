@@ -1,0 +1,17 @@
+[package]
+name = "hiracliwebsite"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+hira = { path = "../../hira" }
+dotenv_reader = { path = "../../level2/dotenv_reader" }
+aws_cfn_stack = { path = "../../level2/aws_cfn_stack" }
+aws_s3 = { path = "../../level2/aws_s3" }
+aws_cloudfront_distribution = { path = "../../level2/aws_cloudfront_distribution" }
+# third party dependencies can be added via extern crate:
+#iam = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "66daeace6fbf11761026201728131bd9c668210b" }
+#cloud_front = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "66daeace6fbf11761026201728131bd9c668210b" }
+cfn_resources = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "66daeace6fbf11761026201728131bd9c668210b" }
+tokio = { version = "*", features = ["full"]}
