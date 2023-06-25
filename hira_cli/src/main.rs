@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, process::{Command, Stdio}};
+use std::{path::{Path, PathBuf}, process::{Command, Stdio}, io::Write};
 use hira_lib::{HiraConfig, parsing::{iter_hira_modules, get_ident_string}, module_loading::print_debug, level0::RuntimeMeta};
 use quote::ToTokens;
 
@@ -146,6 +146,22 @@ fn run_runtime(
     Ok(())
 }
 
+fn handle_stdout(mut s: String) {
+    const MAX_LEN: usize = 77; // we always add 3 at the end to make it 80
+    let was_truncated = s.len() > MAX_LEN;
+    s.truncate(MAX_LEN);
+    while s.len() < MAX_LEN {
+        s.push(' ');
+    }
+    if was_truncated {
+        s.push_str("...");
+    } else {
+        s.push_str("   ");
+    }
+    print!("{}\r", s);
+    let _ = std::io::stdout().flush();
+}
+
 fn build_runtime(
     name: &str,
     wasm_dir: &str,
@@ -163,7 +179,9 @@ fn build_runtime(
         println!("Building runtime {name}");
     }
     let now = std::time::Instant::now();
-    HiraConfig::run_build_runtime_cmd(runtime, &name, &target_dir, crate_name, &hira_runtime_output_path)?;
+    HiraConfig::run_build_runtime_cmd(runtime, &name, &target_dir, crate_name, &hira_runtime_output_path, Some(handle_stdout))?;
+    print!("\n");
+    let _ = std::io::stdout().flush();
     let elapsed = now.elapsed().as_millis();
     let contents = format!("Building {name}, dur={elapsed}ms\n");
     print_debug(logfile, &contents);
