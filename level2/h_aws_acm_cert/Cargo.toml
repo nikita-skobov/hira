@@ -1,0 +1,15 @@
+[package]
+name = "h_aws_acm_cert"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+certificate_manager = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "66daeace6fbf11761026201728131bd9c668210b" }
+cloud_front = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "66daeace6fbf11761026201728131bd9c668210b" }
+cfn_resources = { git = "https://github.com/nikita-skobov/aws_cfn_type_gen", rev = "66daeace6fbf11761026201728131bd9c668210b" }
+hira_lib = { path = "../../hira_lib" }
+aws_cfn_stack = { path = "../aws_cfn_stack" }
+hira = { path = "../../hira" }
+#sapp-jsutils = "0.1"

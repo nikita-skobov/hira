@@ -9,6 +9,7 @@ members = [
     "level2/aws_lambda",
     "level2/aws_cfn_stack",
     "level2/aws_s3",
+    "level2/h_aws_acm_cert",
     "level2/aws_cloudfront_distribution",
     "level2/h_echo",
 ]
